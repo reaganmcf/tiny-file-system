@@ -5,11 +5,11 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 # Where you want to mount the filesystem
-MOUNTDIR=${MOUNTDIR:-/tmp/rpm141/mountdir}
+MOUNTDIR=${MOUNTDIR:-/tmp/$(eval whoami)/mountdir}
 
 ### Undo mount
 if findmnt | grep $MOUNTDIR > /dev/null; then
-  printf "${YELLOW}TFS is already mounted. Unmounting...${NC}\n"
+  printf "${YELLOW}TFS is already mounted at ${MOUNTDIR} - Unmounting...${NC}\n"
   umount $MOUNTDIR;
   if [ $? -eq 0 ]; then
     printf "${GREEN}Unmounting was successful${NC}\n";
@@ -23,7 +23,7 @@ printf "${YELLOW}Building project...${NC}\n"
 make clean;
 make;
 if [ $? -eq 0 ]; then
-  printf "${GREEN}Project build succesffully${NC}\n" 
+  printf "${GREEN}Project built succesffully${NC}\n" 
 else
   printf "${RED}Project failed to build${NC}\n"
   exit 1
@@ -31,7 +31,16 @@ fi
 
 printf "${YELLOW}Checking that mount point exists...${NC}\n"
 if [ -d "$MOUNTDIR" ]; then
-  printf "${GREEN}Mount point exists, safe to continue.${NC}\n"
+  printf "${YELLOW}Mount point exists, deleting files if there are any...${NC}\n"
+  if [ $(ls -A $MOUNTDIR) ] 
+  then
+    rm -r $MOUNTDIR/*
+    if [ $? -eq 0 ]; then
+      printf "${GREEN}Successfully deleted files in mount point.${NC}\n"
+    else
+      printf "${RED}Failed to delete files in mount point!${NC}\n"
+    fi
+  fi 
 else
   printf "${YELLOW}Mount point doesn't exist. Attempting to create it.${NC}\n";
   mkdir -p $MOUNTDIR
@@ -52,3 +61,16 @@ else
   exit 1
 fi
 
+printf "${YELLOW} Attempting to build benchmark...${NC}\n"
+cd benchmark;
+make clean;
+make;
+if [ $? -eq 0 ]; then
+  printf "${GREEN}Benchmark built succesffully${NC}\n"
+else
+  printf "${RED}Failed to build benchmark${NC}\n";
+  exit 1
+fi
+
+printf "${YELLOW}Running simple_test.c${NC}\n";
+./simple_test $MOUNTDIR
