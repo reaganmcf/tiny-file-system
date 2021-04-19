@@ -23,6 +23,7 @@ struct superblock* SUPERBLOCK;
 bitmap_t INODE_BITMAP;
 bitmap_t DBLOCK_BITMAP;
 
+
 int diskfile_found = 0;
 
 // Size constants used for calculating where everything goes in the disk
@@ -164,13 +165,14 @@ int tfs_mkfs() {
 	SUPERBLOCK->i_start_blk = SUPERBLOCK->d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
 	// data blocks start at the block right after the inode table block
 	SUPERBLOCK->d_start_blk = SUPERBLOCK->i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
+	bio_write(0, (void*)SUPERBLOCK);
 
 	// printf("\tsuperblock is at block %d\n \
 	// 	inode bitmap is at block %d\n \
 	// 	dblock bitmap is at block %d\n \
 	// 	inodetable is at block %d\n \
 	// 	dataregion is at block %d\n",
-	// 	0, SUPERBLOCK.i_bitmap_blk, SUPERBLOCK.d_bitmap_blk, SUPERBLOCK.i_start_blk, SUPERBLOCK.d_start_blk);
+	// 	0, SUPERBLOCK->i_bitmap_blk, SUPERBLOCK->d_bitmap_blk, SUPERBLOCK->i_start_blk, SUPERBLOCK->d_start_blk);
 
 	// initialize inode bitmap
 	if((INODE_BITMAP = calloc(MAX_INUM / 8, 0)) == NULL){
@@ -183,12 +185,14 @@ int tfs_mkfs() {
 		perror("ERROR:: Unable to allocate the datablock bitmap.");
 		exit(-1);
 	}
-
+	
+	// update bitmap information for root directory
+	set_bitmap(INODE_BITMAP, 0);
+	set_bitmap(DBLOCK_BITMAP, 0);
 
 	//TODO
-	// update bitmap information for root directory
-
 	// update inode for root directory
+
 
 	return 0;
 }
@@ -203,6 +207,7 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 	if( diskfile_found == 0){
 		tfs_mkfs();
 	}
+	
 
 	// Step 1b: If disk file is found, just initialize in-memory data structures
 	// and read superblock from disk
@@ -220,8 +225,10 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 		}
 	}
 
-	if(SUPERBLOCK){
-		//Read superblock from disk
+	if(!SUPERBLOCK){
+		void* buf = malloc(sizeof(struct superblock*));
+		bio_read(0, buf);
+		SUPERBLOCK = (struct superblock*)buf;
 	}
 
 	return NULL;
@@ -315,6 +322,7 @@ static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
 static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
+	
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
 
@@ -436,6 +444,7 @@ int main(int argc, char *argv[]) {
 	strcat(diskfile_path, "/DISKFILE");
 
 	fuse_stat = fuse_main(argc, argv, &tfs_ope, NULL);
+
 
 	return fuse_stat;
 }
