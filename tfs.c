@@ -1,10 +1,3 @@
-/*
- *  Copyright (C) 2021 CS416 Rutgers CS
- *	Tiny File System
- *	File:	tfs.c
- *
- */
-
 #define FUSE_USE_VERSION 26
 
 #include <fuse.h>
@@ -26,15 +19,17 @@
 char diskfile_path[PATH_MAX];
 
 // Data structures. Note, these must be written to disk after each modification!
-struct superblock SUPERBLOCK;
+struct superblock* SUPERBLOCK;
 bitmap_t INODE_BITMAP;
 bitmap_t DBLOCK_BITMAP;
 
+int diskfile_found = 0;
+
 // Size constants used for calculating where everything goes in the disk
-uint SUPERBLOCK_SIZE_IN_BLOCKS;
-uint INODE_BITMAP_SIZE_IN_BLOCKS;
-uint DBLOCK_BITMAP_SIZE_IN_BLOCKS;
-uint INODE_TABLE_SIZE_IN_BLOCKS;
+#define SUPERBLOCK_SIZE_IN_BLOCKS (ceil((double)sizeof(SUPERBLOCK) / BLOCK_SIZE))
+#define INODE_BITMAP_SIZE_IN_BLOCKS (ceil((double)(MAX_INUM / 8) / BLOCK_SIZE))
+#define DBLOCK_BITMAP_SIZE_IN_BLOCKS (ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE))
+#define INODE_TABLE_SIZE_IN_BLOCKS (ceil((double)(sizeof(struct inode) * MAX_INUM) / BLOCK_SIZE))
 
 /* 
  * Get available inode number from bitmap
@@ -151,43 +146,43 @@ int tfs_mkfs() {
 
 	// Call dev_init() to initialize (Create) Diskfile
 	dev_init(diskfile_path);
-
-	// Calculate number of blocks for partition data
-	uint SUPERBLOCK_SIZE_IN_BLOCKS = ceil((double)sizeof(SUPERBLOCK) / BLOCK_SIZE);
-	uint INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
-	uint DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
-	uint INODE_TABLE_SIZE_IN_BLOCKS = ceil((double)(sizeof(struct inode) * MAX_INUM) / BLOCK_SIZE);
-	
-	// printf("\tsuperblock size in blocks = %d\n", SUPERBLOCK_SIZE_IN_BLOCKS);
-	// printf("\tinode bitmap size in blocks = %d\n", INODE_BITMAP_SIZE_IN_BLOCKS);
-	// printf("\tdblock bitmap size in blocks = %d\n", DBLOCK_BITMAP_SIZE_IN_BLOCKS);
-	// printf("\tinode table size in blocks = %d\n", INODE_TABLE_SIZE_IN_BLOCKS);
+	diskfile_found = 1;
 	
 	// write superblock information
-	SUPERBLOCK.magic_num = MAGIC_NUM;
-	SUPERBLOCK.max_inum = MAX_INUM;
-	SUPERBLOCK.max_dnum = MAX_DNUM;
+	if((SUPERBLOCK = calloc(sizeof(struct superblock), 0)) == NULL){
+		perror("ERROR:: Unable to allocate the superblock.");
+		exit(-1);
+	}
+	SUPERBLOCK->magic_num = MAGIC_NUM;
+	SUPERBLOCK->max_inum = MAX_INUM;
+	SUPERBLOCK->max_dnum = MAX_DNUM;
 	// inode bitmap is the block right after the super block(s)
-	SUPERBLOCK.i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
+	SUPERBLOCK->i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
 	// dblock bitmap is the block right after the inode bitmap block(s)
-	SUPERBLOCK.d_bitmap_blk = SUPERBLOCK.i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
+	SUPERBLOCK->d_bitmap_blk = SUPERBLOCK->i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
 	// inode table block is the block right after the dblock bitmap block(s)
-	SUPERBLOCK.i_start_blk = SUPERBLOCK.d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+	SUPERBLOCK->i_start_blk = SUPERBLOCK->d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
 	// data blocks start at the block right after the inode table block
-	SUPERBLOCK.d_start_blk = SUPERBLOCK.i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
+	SUPERBLOCK->d_start_blk = SUPERBLOCK->i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
 
-	printf("\tsuperblock is at block %d\n \
-		inode bitmap is at block %d\n \
-		dblock bitmap is at block %d\n \
-		inodetable is at block %d\n \
-		dataregion is at block %d\n",
-		0, SUPERBLOCK.i_bitmap_blk, SUPERBLOCK.d_bitmap_blk, SUPERBLOCK.i_start_blk, SUPERBLOCK.d_start_blk);
+	// printf("\tsuperblock is at block %d\n \
+	// 	inode bitmap is at block %d\n \
+	// 	dblock bitmap is at block %d\n \
+	// 	inodetable is at block %d\n \
+	// 	dataregion is at block %d\n",
+	// 	0, SUPERBLOCK.i_bitmap_blk, SUPERBLOCK.d_bitmap_blk, SUPERBLOCK.i_start_blk, SUPERBLOCK.d_start_blk);
 
 	// initialize inode bitmap
-	INODE_BITMAP = calloc(MAX_INUM / 8, 0);
+	if((INODE_BITMAP = calloc(MAX_INUM / 8, 0)) == NULL){
+		perror("ERROR:: Unable to allocate the inode bitmap.");
+		exit(-1);
+	}
 
 	// initialize data block bitmap
-	DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0);
+	if((DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0)) == NULL){
+		perror("ERROR:: Unable to allocate the datablock bitmap.");
+		exit(-1);
+	}
 
 
 	//TODO
@@ -205,10 +200,29 @@ int tfs_mkfs() {
 static void *tfs_init(struct fuse_conn_info *conn) {
     
 	// Step 1a: If disk file is not found, call mkfs
-	tfs_mkfs();
+	if( diskfile_found == 1){
+		tfs_mkfs();
+	}
 
 	// Step 1b: If disk file is found, just initialize in-memory data structures
 	// and read superblock from disk
+	if(!INODE_BITMAP){
+		if((INODE_BITMAP = calloc(MAX_INUM / 8, 0)) == NULL){
+			perror("ERROR:: Unable to allocate the inode bitmap.");
+			exit(-1);
+		}
+	}
+
+	if(!DBLOCK_BITMAP){
+		if((DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0)) == NULL){
+			perror("ERROR:: Unable to allocate the datablock bitmap.");
+			exit(-1);
+		}
+	}
+
+	if(SUPERBLOCK){
+		//Read superblock from disk
+	}
 
 	return NULL;
 }
@@ -216,6 +230,9 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 static void tfs_destroy(void *userdata) {
 
 	// Step 1: De-allocate in-memory data structures
+	free(DBLOCK_BITMAP);
+	free(INODE_BITMAP);
+	free(SUPERBLOCK);
 
 	// Step 2: Close diskfile
 	dev_close();
@@ -422,4 +439,3 @@ int main(int argc, char *argv[]) {
 
 	return fuse_stat;
 }
-
