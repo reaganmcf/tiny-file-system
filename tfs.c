@@ -18,13 +18,23 @@
 #include <sys/time.h>
 #include <libgen.h>
 #include <limits.h>
+#include <math.h>
 
 #include "block.h"
 #include "tfs.h"
 
 char diskfile_path[PATH_MAX];
 
-// Declare your in-memory data structures here
+// Data structures. Note, these must be written to disk after each modification!
+struct superblock SUPERBLOCK;
+bitmap_t INODE_BITMAP;
+bitmap_t DBLOCK_BITMAP;
+
+// Size constants used for calculating where everything goes in the disk
+uint SUPERBLOCK_SIZE_IN_BLOCKS;
+uint INODE_BITMAP_SIZE_IN_BLOCKS;
+uint DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+uint INODE_TABLE_SIZE_IN_BLOCKS;
 
 /* 
  * Get available inode number from bitmap
@@ -140,13 +150,47 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 int tfs_mkfs() {
 
 	// Call dev_init() to initialize (Create) Diskfile
+	dev_init(diskfile_path);
 
+	// Calculate number of blocks for partition data
+	uint SUPERBLOCK_SIZE_IN_BLOCKS = ceil((double)sizeof(SUPERBLOCK) / BLOCK_SIZE);
+	uint INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
+	uint DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
+	uint INODE_TABLE_SIZE_IN_BLOCKS = ceil((double)(sizeof(struct inode) * MAX_INUM) / BLOCK_SIZE);
+	
+	// printf("\tsuperblock size in blocks = %d\n", SUPERBLOCK_SIZE_IN_BLOCKS);
+	// printf("\tinode bitmap size in blocks = %d\n", INODE_BITMAP_SIZE_IN_BLOCKS);
+	// printf("\tdblock bitmap size in blocks = %d\n", DBLOCK_BITMAP_SIZE_IN_BLOCKS);
+	// printf("\tinode table size in blocks = %d\n", INODE_TABLE_SIZE_IN_BLOCKS);
+	
 	// write superblock information
+	SUPERBLOCK.magic_num = MAGIC_NUM;
+	SUPERBLOCK.max_inum = MAX_INUM;
+	SUPERBLOCK.max_dnum = MAX_DNUM;
+	// inode bitmap is the block right after the super block(s)
+	SUPERBLOCK.i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
+	// dblock bitmap is the block right after the inode bitmap block(s)
+	SUPERBLOCK.d_bitmap_blk = SUPERBLOCK.i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
+	// inode table block is the block right after the dblock bitmap block(s)
+	SUPERBLOCK.i_start_blk = SUPERBLOCK.d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+	// data blocks start at the block right after the inode table block
+	SUPERBLOCK.d_start_blk = SUPERBLOCK.i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
+
+	printf("\tsuperblock is at block %d\n \
+		inode bitmap is at block %d\n \
+		dblock bitmap is at block %d\n \
+		inodetable is at block %d\n \
+		dataregion is at block %d\n",
+		0, SUPERBLOCK.i_bitmap_blk, SUPERBLOCK.d_bitmap_blk, SUPERBLOCK.i_start_blk, SUPERBLOCK.d_start_blk);
 
 	// initialize inode bitmap
+	INODE_BITMAP = calloc(MAX_INUM / 8, 0);
 
 	// initialize data block bitmap
+	DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0);
 
+
+	//TODO
 	// update bitmap information for root directory
 
 	// update inode for root directory
@@ -159,11 +203,12 @@ int tfs_mkfs() {
  * FUSE file operations
  */
 static void *tfs_init(struct fuse_conn_info *conn) {
-
+    
 	// Step 1a: If disk file is not found, call mkfs
+	tfs_mkfs();
 
-  // Step 1b: If disk file is found, just initialize in-memory data structures
-  // and read superblock from disk
+	// Step 1b: If disk file is found, just initialize in-memory data structures
+	// and read superblock from disk
 
 	return NULL;
 }
@@ -173,6 +218,7 @@ static void tfs_destroy(void *userdata) {
 	// Step 1: De-allocate in-memory data structures
 
 	// Step 2: Close diskfile
+	dev_close();
 
 }
 
@@ -210,7 +256,7 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 
 static int tfs_mkdir(const char *path, mode_t mode) {
 
-	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
+	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name 
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
 
@@ -323,7 +369,7 @@ static int tfs_truncate(const char *path, off_t size) {
     return 0;
 }
 
-static int tfs_release(const char *path, struct fuse_file_info *fi) {
+static int tfs_release(const char *path, struct fuse_file_info *fi){
 	// For this project, you don't need to fill this function
 	// But DO NOT DELETE IT!
 	return 0;

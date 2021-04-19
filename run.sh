@@ -53,7 +53,7 @@ else
 fi
 
 printf "${YELLOW}Attempting to mount TFS at ${MOUNTDIR}...${NC}\n"
-./tfs -s $MOUNTDIR
+./tfs -s $MOUNTDIR -d
 if [ $? -eq 0 ]; then
   printf "${GREEN}Successfully mounted TFS at ${MOUNTDIR}!${NC}\n"
 else
@@ -61,16 +61,16 @@ else
   exit 1
 fi
 
-printf "${YELLOW} Attempting to build benchmark...${NC}\n"
-cd benchmark;
-make clean;
-make;
-if [ $? -eq 0 ]; then
-  printf "${GREEN}Benchmark built succesffully${NC}\n"
-else
-  printf "${RED}Failed to build benchmark${NC}\n";
-  exit 1
-fi
-
-printf "${YELLOW}Running simple_test.c${NC}\n";
-./simple_test $MOUNTDIR
+# printf "${YELLOW} Attempting to build benchmark...${NC}\n"
+# cd benchmark;
+# make clean;
+# make;
+# if [ $? -eq 0 ]; then
+  # printf "${GREEN}Benchmark built succesffully${NC}\n"
+# else
+  # printf "${RED}Failed to build benchmark${NC}\n";
+  # exit 1
+# fi
+#
+# printf "${YELLOW}Running simple_test.c${NC}\n";
+# ./simple_test $MOUNTDIR

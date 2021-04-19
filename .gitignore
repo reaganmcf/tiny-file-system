@@ -1,0 +1,5 @@
+*.o
+DISKFILE
+benchmark/simple_test
+benchmark/test_case
+tfs
