@@ -200,7 +200,7 @@ int tfs_mkfs() {
 static void *tfs_init(struct fuse_conn_info *conn) {
     
 	// Step 1a: If disk file is not found, call mkfs
-	if( diskfile_found == 1){
+	if( diskfile_found == 0){
 		tfs_mkfs();
 	}
 
