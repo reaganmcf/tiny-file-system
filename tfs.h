@@ -47,7 +47,6 @@ struct dirent {
 	uint16_t len;					/* length of name */
 };
 
-
 /*
  * bitmap operations
  */
