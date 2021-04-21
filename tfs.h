@@ -17,6 +17,10 @@
 #define MAGIC_NUM 0x5C3A
 #define MAX_INUM 1024
 #define MAX_DNUM 16384
+#define ROOT_INODE_NUMBER 0
+
+#define DIRECTORY 0
+#define FILE 1
 
 
 struct superblock {
