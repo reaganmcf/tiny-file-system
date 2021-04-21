@@ -22,6 +22,9 @@
 #define DIRECTORY 0
 #define FILE 1
 
+#define DIRECTORY 0
+#define FILE 1
+
 
 struct superblock {
 	uint32_t	magic_num;			/* magic number */
