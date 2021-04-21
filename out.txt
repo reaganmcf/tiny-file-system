@@ -1,0 +1,10 @@
+[0;33mBuilding project...[0m
+rm -f *.o tfs
+gcc -c -g -Wall -D_FILE_OFFSET_BITS=64 tfs.c -o tfs.o
+gcc -c -g -Wall -D_FILE_OFFSET_BITS=64 block.c -o block.o
+gcc tfs.o block.o -lfuse -o tfs
+[0;32mProject built succesffully[0m
+[0;33mChecking that mount point exists...[0m
+[0;33mMount point exists, deleting files if there are any...[0m
+[0;33mAttempting to mount TFS at /tmp/rmcf/mountdir...[0m
+[0;31mFailed to mount TFS at /tmp/rmcf/mountdir.[0m

@@ -153,14 +153,15 @@ int readi(uint16_t ino, struct inode *inode) {
 
 	// Step 3: Read the block from disk and then copy into inode structure
 	void* buf = malloc(BLOCK_SIZE);
-	bio_read(block_number, buf);
-	if(buf == NULL){
+	if(bio_read(block_number, buf) < 0){
 		perror("ERROR:: Could not read inode from inode table");
 		exit(-1);
 	}
+	
+
 	struct inode* block_of_inodes = (struct inode*)buf;
 	printf("\n\n\nino = %d, block num = %d, offset = %d\n\n\n", ino, block_number, offset);
-	inode = &block_of_inodes[offset];
+	*inode = block_of_inodes[offset];
 	free(buf);
 	return 1;
 }
@@ -199,14 +200,17 @@ int writei(uint16_t ino, struct inode *inode) {
 int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *dirent) {
 
 	// Step 1: Call readi() to get the inode using ino (inode number of current directory)
-	struct inode* cur_inode = malloc(sizeof(struct inode));
+	struct inode* cur_inode = calloc(1, sizeof(struct inode));
 	readi(ino, cur_inode);
 
 	// Step 2: Get data block of current directory from inode
-	
+	void* data_block = calloc(1, sizeof(BLOCK_SIZE));
+	bio_read(cur_inode->ino, data_block);	
 
 	// Step 3: Read directory's data block and check each directory entry.
 	//If the name matches, then copy directory entry to dirent structure
+	struct dirent *directory = (struct dirent*) data_block;
+	memcpy(dirent, directory, sizeof(struct dirent));
 
 	return 0;
 }
@@ -256,15 +260,15 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// base case
 	char *token = strtok_r(path, "/", &path);
 	printf("token = %s\n", token);
-	if(token == NULL) {
-	  return 0;
-	}
+	return 0;
+	// if(token == NULL) {
+	  // return 0;
+	// }
 
 	// find the dirent we are at, since we haven't found the terminal inode yet
-	struct dirent *cur_dirent = malloc(sizeof(struct dirent));
+	struct dirent *cur_dirent = calloc(1, sizeof(struct dirent));
 	dir_find(ino, token, sizeof(token), cur_dirent);
 	return get_node_by_path(path, cur_dirent->ino, inode);
-
 }
 
 /* 
@@ -277,7 +281,7 @@ int tfs_mkfs() {
 	diskfile_found = 1;
 	
 	// write superblock information
-	if((SUPERBLOCK = calloc(sizeof(struct superblock), 0)) == NULL){
+	if((SUPERBLOCK = calloc(1, sizeof(struct superblock))) == NULL){
 		perror("ERROR:: Unable to allocate the superblock.");
 		exit(-1);
 	}
@@ -302,13 +306,13 @@ int tfs_mkfs() {
 	// 	0, SUPERBLOCK->i_bitmap_blk, SUPERBLOCK->d_bitmap_blk, SUPERBLOCK->i_start_blk, SUPERBLOCK->d_start_blk);
 
 	// initialize inode bitmap
-	if((INODE_BITMAP = calloc(MAX_INUM / 8, 0)) == NULL){
+	if((INODE_BITMAP = calloc(1, MAX_INUM / 8)) == NULL){
 		perror("ERROR:: Unable to allocate the inode bitmap.");
 		exit(-1);
 	}
 
 	// initialize data block bitmap
-	if((DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0)) == NULL){
+	if((DBLOCK_BITMAP = calloc(1, MAX_DNUM / 8)) == NULL){
 		perror("ERROR:: Unable to allocate the datablock bitmap.");
 		exit(-1);
 	}
@@ -335,7 +339,7 @@ int tfs_mkfs() {
 	}
 	root_dir_inode->vstat = *buff;
 
-	bio_write(SUPERBLOCK->i_start_blk, (void*)(root_dir_inode));
+	writei(SUPERBLOCK->i_start_blk, (void*)(root_dir_inode));
 
 	//TESTING
 	struct inode* test = malloc(sizeof(struct inode));
@@ -359,14 +363,14 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 	// Step 1b: If disk file is found, just initialize in-memory data structures
 	// and read superblock from disk
 	if(!INODE_BITMAP){
-		if((INODE_BITMAP = calloc(MAX_INUM / 8, 0)) == NULL){
+		if((INODE_BITMAP = calloc(1, MAX_INUM / 8)) == NULL){
 			perror("ERROR:: Unable to allocate the inode bitmap.");
 			exit(-1);
 		}
 	}
 
 	if(!DBLOCK_BITMAP){
-		if((DBLOCK_BITMAP = calloc(MAX_DNUM / 8, 0)) == NULL){
+		if((DBLOCK_BITMAP = calloc(1, MAX_DNUM / 8)) == NULL){
 			perror("ERROR:: Unable to allocate the datablock bitmap.");
 			exit(-1);
 		}
@@ -400,9 +404,9 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 	// Step 2: fill attribute of file into stbuf from inode
 
-		stbuf->st_mode   = S_IFDIR | 0755;
-		stbuf->st_nlink  = 2;
-		time(&stbuf->st_mtime);
+	stbuf->st_mode   = S_IFDIR | 0755;
+	stbuf->st_nlink  = 2;
+	time(&stbuf->st_mtime);
 
 	return 0;
 }
@@ -413,7 +417,7 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 	
 	// Step 2: If not find, return -1
 
-    return 0;
+	return 0;
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
@@ -422,13 +426,11 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 
 	printf("PATH: %s", path); 
 	// Step 1: Call get_node_by_path() to get inode from path
-	struct inode *dir_inode; 
+	struct inode *dir_inode = calloc(1, sizeof(struct inode)); 
 	get_node_by_path(path, ROOT_INODE_NUMBER, dir_inode);
 
-	// Step 2: Read directory entries from its data blocks, and copy them to fille
-	struct stat *t;
-	
-	filler(buffer, "/", NULL, offset);
+	// Step 2: Read directory entries from its data blocks, and copy them to filler
+	//filler(buffer, path, NULL, 0);
 
 	printf("\n\n\n");
 	return 0;
