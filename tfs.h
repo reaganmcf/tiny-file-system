@@ -21,7 +21,9 @@
 
 #define DIRECTORY 0
 #define FILE 1
-
+#define INVALID_LINK -1
+#define DIRECT_POINTER_LIST_NUM 16
+#define INDIRECT_POINTER_LIST_NUM 8
 
 struct superblock {
 	uint32_t	magic_num;			/* magic number */

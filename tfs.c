@@ -207,10 +207,13 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 	void* data_block = calloc(1, sizeof(BLOCK_SIZE));
 	bio_read(cur_inode->ino, data_block);	
 
+
 	// Step 3: Read directory's data block and check each directory entry.
 	//If the name matches, then copy directory entry to dirent structure
 	struct dirent *directory = (struct dirent*) data_block;
 	memcpy(dirent, directory, sizeof(struct dirent));
+
+	// TODO loop over direct indirect ptrs and cast to dirents. Compare file name
 
 	return 0;
 }
@@ -330,6 +333,13 @@ int tfs_mkfs() {
 	root_dir_inode->size = 69;
 	root_dir_inode->type = DIRECTORY;
 	root_dir_inode->link = 0;
+	for(int i = 0; i < INDIRECT_POINTER_LIST_NUM; i++) {
+		root_dir_inode->indirect_ptr[i] = INVALID_LINK;
+	}
+
+	for(int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
+		root_dir_inode->direct_ptr[i] = INVALID_LINK;
+	}
 	
 	struct stat* buff;
 	int stat_result = stat("/", buff);
@@ -429,8 +439,16 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 	struct inode *dir_inode = calloc(1, sizeof(struct inode)); 
 	get_node_by_path(path, ROOT_INODE_NUMBER, dir_inode);
 
+	// TODO check indirect ptrs
+	for(int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
+		if(dir_inode->direct_ptr[i] != INVALID_LINK) {
+			// TODO get dirent from the inode, and call filler
+			
+		}
+	}
+	
 	// Step 2: Read directory entries from its data blocks, and copy them to filler
-	//filler(buffer, path, NULL, 0);
+	filler(buffer, "test!", NULL, 0);
 
 	printf("\n\n\n");
 	return 0;
