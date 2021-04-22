@@ -25,6 +25,14 @@
 #define DIRECT_POINTER_LIST_NUM 16
 #define INDIRECT_POINTER_LIST_NUM 8
 
+// Codes
+#define FOUND_INODE 0
+#define NO_INODE_FOUND -1
+#define INVALID 0
+#define VALID 1
+#define FOUND_DIR 0
+#define NO_DIR_FOUND 1
+
 struct superblock {
 	uint32_t	magic_num;			/* magic number */
 	uint16_t	max_inum;			/* maximum inode number */

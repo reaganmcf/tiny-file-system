@@ -10,7 +10,7 @@ MOUNTDIR=${MOUNTDIR:-/tmp/$(eval whoami)/mountdir}
 ### Undo mount
 if findmnt | grep $MOUNTDIR > /dev/null; then
   printf "${YELLOW}TFS is already mounted at ${MOUNTDIR} - Unmounting...${NC}\n"
-  umount $MOUNTDIR;
+  fusermount -u $MOUNTDIR;
   if [ $? -eq 0 ]; then
     printf "${GREEN}Unmounting was successful${NC}\n";
   else
