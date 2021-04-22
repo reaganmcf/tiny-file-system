@@ -199,7 +199,7 @@ writei(uint16_t ino, struct inode* inode)
     perror("ERROR:: Could not read inode from inode table");
     exit(-1);
   }
-  struct inode* block_of_inodes = (struct inode*)buf;  
+  struct inode* block_of_inodes = (struct inode*)buf;
   printf("\n\n\nino = %d, block num = %d, offset = %d\n\n\n",
          ino,
          block_number,
@@ -244,15 +244,12 @@ dir_find(uint16_t ino,
     struct dirent* directory = (struct dirent*)data_block;
 
     // if the names match, then this is the one we are looking for
-    if(strcmp(directory->name, fname) == 0) {        
+    if (strcmp(directory->name, fname) == 0) {
       memcpy(dirent, directory, sizeof(directory));
       return FOUND_DIR;
     }
-  
 
-   // TODO check indirect ptrs too
-
-
+    // TODO check indirect ptrs too
   }
 
   return NO_DIR_FOUND;
@@ -267,6 +264,8 @@ dir_add(struct inode dir_inode,
 
   // Step 1: Read dir_inode's data block and check each directory entry of
   // dir_inode
+
+  // TODO
 
   // Step 2: Check if fname (directory name) is already used in other entries
 
@@ -319,16 +318,17 @@ get_node_by_path(const char* path, uint16_t ino, struct inode* inode)
   char* token = strtok_r(path, "/", &path);
   printf("token = %s\n", token);
   if (token == NULL) {
-    if(cur_inode.valid == VALID) return FOUND_INODE;
+    if (cur_inode.valid == VALID)
+      return FOUND_INODE;
     return NO_INODE_FOUND;
   }
 
   // find the dirent we are at, since we haven't found the terminal inode yet
   struct dirent* cur_dirent = calloc(1, sizeof(struct dirent));
   int status = dir_find(ino, token, sizeof(token), cur_dirent);
-  if(status == NO_DIR_FOUND) {
-    perror("dir_find failed when it should not have!");
-    exit(-1);
+  if (status == NO_DIR_FOUND) {
+    printf("get_node_by_path didn't find node for the path!\n");
+    return NO_INODE_FOUND;
   }
 
   return get_node_by_path(path, cur_dirent->ino, inode);
@@ -342,8 +342,7 @@ tfs_mkfs()
 {
 
   // Calculate constants
-  SUPERBLOCK_SIZE_IN_BLOCKS =
-    ceil(sizeof(struct superblock) / BLOCK_SIZE);
+  SUPERBLOCK_SIZE_IN_BLOCKS = ceil(sizeof(struct superblock) / BLOCK_SIZE);
   INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
   DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
   INODES_PER_BLOCK = ceil((double)BLOCK_SIZE / sizeof(struct inode));
@@ -355,7 +354,7 @@ tfs_mkfs()
   diskfile_found = 1;
   // write superblock information
   SUPERBLOCK = malloc(sizeof(struct superblock));
-  if(SUPERBLOCK == NULL) {
+  if (SUPERBLOCK == NULL) {
     perror("ERROR:: Unable to allocate the superblock.");
     exit(-1);
   }
@@ -405,9 +404,8 @@ tfs_mkfs()
          sizeof(struct inode));
 
   // Allocate all inodes, initialize their ptrs and state to invalid, and write
-  // to disk. Note, we start at 1 because we write the root dir node (ino 1) at the end 
-  // of this function anyway
-  // for(int i = 1; i < MAX_INUM; i++) {
+  // to disk. Note, we start at 1 because we write the root dir node (ino 1) at
+  // the end of this function anyway for(int i = 1; i < MAX_INUM; i++) {
   //   struct inode* inode = malloc(BLOCK_SIZE);
   //   memset(inode, 0, BLOCK_SIZE);
   //        inode[i].valid = INVALID;
@@ -520,16 +518,27 @@ tfs_getattr(const char* path, struct stat* stbuf)
 {
 
   // Step 1: call get_node_by_path() to get inode from path
-  //struct inode* inode = malloc(sizeof(struct inode));
-  //get_node_by_path(path, ROOT_INODE_NUMBER, inode);
+  struct inode inode;
+  int status = get_node_by_path(path, ROOT_INODE_NUMBER, &inode);
+  if (status == NO_INODE_FOUND) {
+    printf("Couldn't find inode for the path!\n");
+    return -ENOENT;
+  }
 
+  if (inode.type == DIRECTORY) {
+    stbuf->st_mode = S_IFDIR | 0755;
+    stbuf->st_nlink = 2;
+  } else {
+    stbuf->st_mode = S_IFREG | 0644;
+    stbuf->st_nlink = 1;
+  }
 
   // Step 2: fill attribute of file into stbuf from inode
-  stbuf->st_mode = S_IFDIR | 0755;
-  stbuf->st_nlink = 2;
+  stbuf->st_uid = getuid();
+  stbuf->st_gid = getgid();
   time(&stbuf->st_mtime);
 
-  return 0;
+  return FOUND_INODE;
 }
 
 static int
@@ -551,12 +560,10 @@ tfs_readdir(const char* path,
             struct fuse_file_info* fi)
 {
 
-  printf("\n\n\n");
-
   // Step 1: Call get_node_by_path() to get inode from path
   struct inode dir_inode;
   int STATUS = get_node_by_path(path, ROOT_INODE_NUMBER, &dir_inode);
-  if(STATUS == NO_INODE_FOUND) {
+  if (STATUS == NO_INODE_FOUND) {
     perror("get_node_by_path didn't find a node when it should've!");
     exit(-1);
   }
@@ -564,19 +571,17 @@ tfs_readdir(const char* path,
   for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
     if (dir_inode.direct_ptr[i] != INVALID_LINK) {
       printf("%d\n", dir_inode.direct_ptr[i]);
-      
+
       // get the dirent from the inode
-      void* data_block= malloc(sizeof(BLOCK_SIZE));
+      void* data_block = malloc(sizeof(BLOCK_SIZE));
       bio_read(dir_inode.direct_ptr[i], data_block);
-      struct dirent *dirent = (struct dirent*)data_block;
+      struct dirent* dirent = (struct dirent*)data_block;
       filler(buffer, dirent->ino, NULL, 0);
     }
   }
 
-  // Step 2: Read directory entries from its data blocks, and copy them to
-  // filler
+  // TODO support indirect ptrs
 
-  printf("\n\n\n");
   return 0;
 }
 
@@ -634,22 +639,33 @@ static int
 tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 {
 
-  printf("\n\n\n");
+  printf("CREATE:\n");
   // Step 1: Use dirname() and basename() to separate parent directory path and
   // target file name
-  char* directory_name = dirname(path);
+  // This won't work without a strcpy, it fucks up the ptr value
+  char* path_copy = calloc(0, strlen(path) + 1);
+  strcpy(path_copy, path);
+  char* directory_name = dirname(path_copy);
   char* base_name = basename(path);
 
-  printf("create: directory_name = %s  ,   base_name = %s\n",
+  printf("\tdirectory_name = %s, base_name = %s\n\tpath = %s\n",
          directory_name,
-         base_name);
+         base_name,
+         path);
 
   // Step 2: Call get_node_by_path() to get inode of parent directory
+  struct inode parent_dir_inode;
+  get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_dir_inode);
 
   // Step 3: Call get_avail_ino() to get an available inode number
+  int file_ino = get_avail_ino();
 
   // Step 4: Call dir_add() to add directory entry of target file to parent
   // directory
+  dir_add(parent_dir_inode,
+          file_ino,
+          base_name,
+          sizeof(char) * (strlen(base_name) + 1));
 
   // Step 5: Update inode for target file
 
