@@ -262,22 +262,56 @@ dir_add(struct inode dir_inode,
         size_t name_len)
 {
 
-  // Step 1: Read dir_inode's data block and check each directory entry of
-  // dir_inode
+  int idx_of_first_invalid = -1;
+  // Step 1: Read dir_inode's data block and check each directory entry of dir_inode
+  for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
 
-  // TODO
+    // If this current pointer is invlaid, then skip
+    if (dir_inode.direct_ptr[i] == INVALID_LINK){
+      if(idx_of_first_invalid == -1){
+        idx_of_first_invalid = i;
+      }
+      continue;
+    }
+      
+    // Read the data block
+    void* data_block = calloc(1, sizeof(BLOCK_SIZE));
+    bio_read(dir_inode.direct_ptr, data_block);
 
-  // Step 2: Check if fname (directory name) is already used in other entries
+    // Step 2: Check if fname (directory name) is already used in other entries
+    struct dirent* directory = (struct dirent*)data_block;
+
+    if (strcmp(directory->name, fname) == 0) {
+      perror("ERROF:: The directory entry already exists. Please rename and try again.");
+      return 0;
+    }
+  }
 
   // Step 3: Add directory entry in dir_inode's data block and write to disk
+  if(idx_of_first_invalid >= 0){
 
-  // Allocate a new data block for this directory if it does not exist
+    // Allocate a new data block for this directory if it does not exist
+     struct dirent* new_directory_entry = malloc(sizeof(struct dirent));
+    strcpy(new_directory_entry->name, fname);
+    new_directory_entry->ino = f_ino;
+    new_directory_entry->len = name_len;
+    new_directory_entry->valid = VALID;
 
-  // Update directory inode
+    // Write directory entry
+    int dblock_num = get_avail_blkno();
+    bio_write(dblock_num, (void*)new_directory_entry);
 
-  // Write directory entry
+    // Update directory inode
+    dir_inode.direct_ptr[idx_of_first_invalid] = dblock_num;
+    free(new_directory_entry);
 
-  return 0;
+    //We have not touched indirect pointers yet, so I'm just making nothing happen if a directory's direct pointers are filled
+  }else{
+    perror("ERROR:: The creation of this file will require indirect directory pointers, which we have not implemented.");
+    return 0;
+  }
+  return 1;
+  
 }
 
 int
@@ -315,13 +349,15 @@ get_node_by_path(const char* path, uint16_t ino, struct inode* inode)
   memcpy(inode, &cur_inode, sizeof(struct inode));
 
   // base case
-  char* token = strtok_r(path, "/", &path);
-  printf("token = %s\n", token);
-  if (token == NULL) {
+  char* test = strchr(path, "/");
+  if (test == NULL) {
     if (cur_inode.valid == VALID)
       return FOUND_INODE;
     return NO_INODE_FOUND;
   }
+
+  char* token = strtok_r(path, "/", &path);
+  printf("token = %s\n", token);
 
   // find the dirent we are at, since we haven't found the terminal inode yet
   struct dirent* cur_dirent = calloc(1, sizeof(struct dirent));
@@ -454,6 +490,7 @@ tfs_mkfs()
   root_dir_inode->vstat = *buff;
 
   writei(ROOT_INODE_NUMBER, (void*)(root_dir_inode));
+
 
   // TESTING
   struct inode test;
@@ -668,8 +705,28 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
           sizeof(char) * (strlen(base_name) + 1));
 
   // Step 5: Update inode for target file
+  struct inode new_file_inode;
+  new_file_inode.ino = file_ino;
+  new_file_inode.valid = VALID;
+  new_file_inode.size = 0;
+  new_file_inode.link = 0;
+  for (int i = 0; i < INDIRECT_POINTER_LIST_NUM; i++) {
+    new_file_inode.indirect_ptr[i] = INVALID_LINK;
+  }
 
+  for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
+    new_file_inode.direct_ptr[i] = INVALID_LINK;
+  }
+
+  struct stat* buff;
+  int stat_result = stat(path, buff);
+  if (buff == NULL) {
+    perror("ERROR:: Unable to build a stat structure.");
+    exit(-1);
+  }
+  new_file_inode.vstat = *buff;
   // Step 6: Call writei() to write inode to disk
+  writei(file_ino, &new_file_inode);
 
   return 0;
 }
