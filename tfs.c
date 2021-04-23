@@ -58,8 +58,7 @@ get_avail_ino()
 
   bitmap_t buf = (bitmap_t)malloc(sizeof(char) * (MAX_INUM / 8));
   for (int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++) {
-    bio_read(SUPERBLOCK->i_bitmap_blk + i,
-             buf[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
+    bio_read(SUPERBLOCK->i_bitmap_blk + i, buf);;
   }
 
   INODE_BITMAP = (bitmap_t)buf;
@@ -138,7 +137,7 @@ get_avail_blkno()
     bio_write(SUPERBLOCK->d_bitmap_blk + i,
               DBLOCK_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
   }
-  free(buf);
+  //free(buf);
   return idx;
 }
 
@@ -492,10 +491,9 @@ tfs_mkfs()
   writei(ROOT_INODE_NUMBER, (void*)(root_dir_inode));
   
   
-  // add direct ptr for . and ..
-  //int dot_ino = get_avail_ino();
-  //printf("dot ino = %d\n", dot_ino);
-  dir_add(*root_dir_inode, 1, ".", 2); 
+  // add direct ptr for .
+  int dot_ino = get_avail_ino();
+  dir_add(*root_dir_inode, dot_ino, ".", 2); 
 
   // TESTING
   struct inode test;
