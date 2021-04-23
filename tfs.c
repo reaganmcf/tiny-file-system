@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "block.h"
 #include "tfs.h"
@@ -107,8 +108,7 @@ get_avail_blkno()
 
   bitmap_t buf = (bitmap_t)malloc(sizeof(char) * (MAX_DNUM / 8));
   for (int i = 0; i < DBLOCK_BITMAP_SIZE_IN_BLOCKS; i++) {
-    bio_read(SUPERBLOCK->d_bitmap_blk + i,
-             buf[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
+    bio_read(SUPERBLOCK->d_bitmap_blk + i, buf);
   }
 
   DBLOCK_BITMAP = (bitmap_t)buf;
@@ -126,6 +126,7 @@ get_avail_blkno()
       break;
     }
   }
+
   if (idx == -1) {
     perror("ERROR:: No available inodes in dnode table.");
     exit(-1);
@@ -138,7 +139,7 @@ get_avail_blkno()
               DBLOCK_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
   }
   free(buf);
-  return 0;
+  return idx;
 }
 
 /*
@@ -167,7 +168,7 @@ readi(uint16_t ino, struct inode* inode)
   }
 
   struct inode* block_of_inodes = (struct inode*)buf;
-  printf("\n\n\nino = %d, block num = %d, offset = %d\n\n\n",
+  printf("READI:: ino = %d, block num = %d, offset = %d\n",
          ino,
          block_number,
          offset);
@@ -200,7 +201,7 @@ writei(uint16_t ino, struct inode* inode)
     exit(-1);
   }
   struct inode* block_of_inodes = (struct inode*)buf;
-  printf("\n\n\nino = %d, block num = %d, offset = %d\n\n\n",
+  printf("WRITEI:: ino = %d, block num = %d, offset = %d\n",
          ino,
          block_number,
          offset);
@@ -291,7 +292,7 @@ dir_add(struct inode dir_inode,
   if(idx_of_first_invalid >= 0){
 
     // Allocate a new data block for this directory if it does not exist
-     struct dirent* new_directory_entry = malloc(sizeof(struct dirent));
+    struct dirent* new_directory_entry = malloc(sizeof(struct dirent));
     strcpy(new_directory_entry->name, fname);
     new_directory_entry->ino = f_ino;
     new_directory_entry->len = name_len;
@@ -299,13 +300,15 @@ dir_add(struct inode dir_inode,
 
     // Write directory entry
     int dblock_num = get_avail_blkno();
-    bio_write(dblock_num, (void*)new_directory_entry);
+    printf("DIR_ADD::next available data block number is %d. Actual block # in disk is %d\n", dblock_num, SUPERBLOCK->d_start_blk + dblock_num);
+    bio_write(SUPERBLOCK->d_start_blk + dblock_num, (void*)new_directory_entry);
 
-    // Update directory inode
+    // Update directory inode and write it to disk
     dir_inode.direct_ptr[idx_of_first_invalid] = dblock_num;
+    writei(dir_inode.ino, (void*)&dir_inode);
+    
     free(new_directory_entry);
-
-    //We have not touched indirect pointers yet, so I'm just making nothing happen if a directory's direct pointers are filled
+    //TODO We have not touched indirect pointers yet, so I'm just making nothing happen if a directory's direct pointers are filled
   }else{
     perror("ERROR:: The creation of this file will require indirect directory pointers, which we have not implemented.");
     return 0;
@@ -332,8 +335,6 @@ dir_remove(struct inode dir_inode, const char* fname, size_t name_len)
 /*
  * namei operation
  *
- * Returns 0 when successfully found the inode
- * Return
  */
 int
 get_node_by_path(const char* path, uint16_t ino, struct inode* inode)
@@ -348,22 +349,19 @@ get_node_by_path(const char* path, uint16_t ino, struct inode* inode)
   readi(ino, &cur_inode);
   memcpy(inode, &cur_inode, sizeof(struct inode));
 
-  // base case
-  char* test = strchr(path, "/");
-  if (test == NULL) {
+  char* token = strtok_r(path, "/", &path);
+  printf("GET_NODE_BY_PATH:: token = %s\n", token);
+  if (token == NULL) {
     if (cur_inode.valid == VALID)
       return FOUND_INODE;
     return NO_INODE_FOUND;
   }
 
-  char* token = strtok_r(path, "/", &path);
-  printf("token = %s\n", token);
-
   // find the dirent we are at, since we haven't found the terminal inode yet
   struct dirent* cur_dirent = calloc(1, sizeof(struct dirent));
   int status = dir_find(ino, token, sizeof(token), cur_dirent);
   if (status == NO_DIR_FOUND) {
-    printf("get_node_by_path didn't find node for the path!\n");
+    printf("GET_NODE_BY_PATH:: get_node_by_path didn't find node for the path!\n");
     return NO_INODE_FOUND;
   }
 
@@ -416,12 +414,14 @@ tfs_mkfs()
     perror("ERROR:: Unable to allocate the inode bitmap.");
     exit(-1);
   }
+  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
 
   // initialize data block bitmap
   if ((DBLOCK_BITMAP = calloc(1, MAX_DNUM / 8)) == NULL) {
     perror("ERROR:: Unable to allocate the datablock bitmap.");
     exit(-1);
   }
+  bio_write(SUPERBLOCK->d_bitmap_blk, (void*)DBLOCK_BITMAP);
 
   printf("Superblock configured: \n \
 - inode bitmap size in blocks = %lu \n \
@@ -468,7 +468,7 @@ tfs_mkfs()
     exit(-1);
   }
 
-  root_dir_inode->ino = 0;
+  root_dir_inode->ino = ROOT_INODE_NUMBER;
   root_dir_inode->valid = 1;
   root_dir_inode->size = sizeof(root_dir_inode);
   root_dir_inode->type = DIRECTORY;
@@ -490,12 +490,17 @@ tfs_mkfs()
   root_dir_inode->vstat = *buff;
 
   writei(ROOT_INODE_NUMBER, (void*)(root_dir_inode));
-
+  
+  
+  // add direct ptr for . and ..
+  //int dot_ino = get_avail_ino();
+  //printf("dot ino = %d\n", dot_ino);
+  dir_add(*root_dir_inode, 1, ".", 2); 
 
   // TESTING
   struct inode test;
   readi(0, &test);
-  printf("\n\ntesting: %d\n\n", test.direct_ptr[0]);
+  //printf("\n\ntesting: %d\n\n", test.direct_ptr[0]);
   return 0;
 }
 
@@ -558,13 +563,15 @@ tfs_getattr(const char* path, struct stat* stbuf)
   struct inode inode;
   int status = get_node_by_path(path, ROOT_INODE_NUMBER, &inode);
   if (status == NO_INODE_FOUND) {
-    printf("Couldn't find inode for the path!\n");
+    printf("GETATTR::Couldn't find inode for the path!\n");
     return -ENOENT;
   }
 
+  printf("GETATTR::Found inode for the file!\n");
+
   if (inode.type == DIRECTORY) {
     stbuf->st_mode = S_IFDIR | 0755;
-    stbuf->st_nlink = 2;
+    stbuf->st_nlink = 1; // . entry
   } else {
     stbuf->st_mode = S_IFREG | 0644;
     stbuf->st_nlink = 1;
@@ -607,13 +614,15 @@ tfs_readdir(const char* path,
 
   for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
     if (dir_inode.direct_ptr[i] != INVALID_LINK) {
-      printf("%d\n", dir_inode.direct_ptr[i]);
+      printf("READDIR:: direct ptr valid with value %d\n", dir_inode.direct_ptr[i]);
 
       // get the dirent from the inode
-      void* data_block = malloc(sizeof(BLOCK_SIZE));
-      bio_read(dir_inode.direct_ptr[i], data_block);
+      void* data_block = malloc(BLOCK_SIZE);
+      printf("READDIR:: reading from %d\n",SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i]);
+      bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i], data_block);
       struct dirent* dirent = (struct dirent*)data_block;
-      filler(buffer, dirent->ino, NULL, 0);
+      filler(buffer, dirent->name, NULL, 0);
+      
     }
   }
 
@@ -675,27 +684,26 @@ tfs_releasedir(const char* path, struct fuse_file_info* fi)
 static int
 tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
 {
-
-  printf("CREATE:\n");
   // Step 1: Use dirname() and basename() to separate parent directory path and
-  // target file name
+  // target file name. entry
   // This won't work without a strcpy, it fucks up the ptr value
-  char* path_copy = calloc(0, strlen(path) + 1);
-  strcpy(path_copy, path);
-  char* directory_name = dirname(path_copy);
+  //char* path_copy = calloc(1, strlen(path) + 1);
+  //strcpy(path_copy, path);
+  char* directory_name = dirname(path);
   char* base_name = basename(path);
 
-  printf("\tdirectory_name = %s, base_name = %s\n\tpath = %s\n",
+  printf("CREATE:: directory_name = %s, base_name = %s\n",
          directory_name,
-         base_name,
-         path);
+         base_name);
 
   // Step 2: Call get_node_by_path() to get inode of parent directory
   struct inode parent_dir_inode;
   get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_dir_inode);
 
+  printf("MALLOC ISSUES IN GET_NODE_PATH!\n");
+
   // Step 3: Call get_avail_ino() to get an available inode number
-  int file_ino = get_avail_ino();
+  int file_ino = get_avail_ino(); 
 
   // Step 4: Call dir_add() to add directory entry of target file to parent
   // directory
