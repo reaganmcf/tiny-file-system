@@ -58,7 +58,7 @@ get_avail_ino()
 
   bitmap_t buf = (bitmap_t)malloc(sizeof(char) * (MAX_INUM / 8));
   for (int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++) {
-    bio_read(SUPERBLOCK->i_bitmap_blk + i, buf);;
+    bio_read(SUPERBLOCK->i_bitmap_blk + i, buf);
   }
 
   INODE_BITMAP = (bitmap_t)buf;
@@ -87,7 +87,7 @@ get_avail_ino()
     bio_write(SUPERBLOCK->i_bitmap_blk + i,
               INODE_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
   }
-  free(buf);
+  //free(buf);
 
   return 1;
 }
@@ -172,8 +172,8 @@ readi(uint16_t ino, struct inode* inode)
          block_number,
          offset);
 
-  *inode = block_of_inodes[offset];
-  free(buf);
+  *inode = *(block_of_inodes + offset);
+  //free(buf);
   return 1;
 }
 
@@ -223,7 +223,7 @@ dir_find(uint16_t ino,
 
   // Step 1: Call readi() to get the inode using ino (inode number of current
   // directory)
-  struct inode* cur_inode = calloc(1, sizeof(struct inode));
+  struct inode* cur_inode = malloc(sizeof(struct inode));
   readi(ino, cur_inode);
 
   // TODO loop over direct ptrs and cast to dirents, then compare
@@ -235,17 +235,20 @@ dir_find(uint16_t ino,
     if (cur_inode->direct_ptr[i] == INVALID_LINK)
       continue;
 
+    printf("DIR_FIND:: Non invalid inode link at %d\n", i);
+
     // Read the data block
-    void* data_block = calloc(1, sizeof(BLOCK_SIZE));
-    bio_read(cur_inode->direct_ptr, data_block);
+    void* data_block = malloc(BLOCK_SIZE);
+    bio_read(SUPERBLOCK->d_start_blk + cur_inode->direct_ptr[i], data_block);
 
     // Step 3: Read directory's data block and check each directory entry.
     // If the name matches, then copy directory entry to dirent structure
-    struct dirent* directory = (struct dirent*)data_block;
+    struct dirent* entry = (struct dirent*)data_block;
+    printf("DIR_FIND:: entry->name = %s\n", entry->name);
 
     // if the names match, then this is the one we are looking for
-    if (strcmp(directory->name, fname) == 0) {
-      memcpy(dirent, directory, sizeof(directory));
+    if (strcmp(entry->name, fname) == 0) {
+      memcpy(dirent, entry, sizeof(entry));
       return FOUND_DIR;
     }
 
@@ -275,30 +278,35 @@ dir_add(struct inode dir_inode,
     }
       
     // Read the data block
-    void* data_block = calloc(1, sizeof(BLOCK_SIZE));
-    bio_read(dir_inode.direct_ptr, data_block);
+    // void* data_block = calloc(1, BLOCK_SIZE);
+    // bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[idx_of_first_invalid], data_block);
 
-    // Step 2: Check if fname (directory name) is already used in other entries
-    struct dirent* directory = (struct dirent*)data_block;
+    // // Step 2: Check if fname (directory name) is already used in other entries
+    // struct dirent* directory = (struct dirent*)data_block;
 
-    if (strcmp(directory->name, fname) == 0) {
-      perror("ERROF:: The directory entry already exists. Please rename and try again.");
-      return 0;
-    }
+    // if (strcmp(directory->name, fname) == 0) {
+    //   perror("ERROF:: The directory entry already exists. Please rename and try again.");
+    //   return 0;
+    // }
   }
 
   // Step 3: Add directory entry in dir_inode's data block and write to disk
   if(idx_of_first_invalid >= 0){
 
+    printf("DIR_ADD:: filename = %s\n", fname);
+
     // Allocate a new data block for this directory if it does not exist
     struct dirent* new_directory_entry = malloc(sizeof(struct dirent));
-    strcpy(new_directory_entry->name, fname);
+    memcpy(new_directory_entry->name, fname, name_len + 1);
     new_directory_entry->ino = f_ino;
     new_directory_entry->len = name_len;
     new_directory_entry->valid = VALID;
+    printf("DIR_ADD:: SET FILENAME = %s\n", new_directory_entry->name);
 
     // Write directory entry
     int dblock_num = get_avail_blkno();
+    set_bitmap(DBLOCK_BITMAP, dblock_num);
+    bio_write(SUPERBLOCK->d_bitmap_blk, (void*)DBLOCK_BITMAP);
     printf("DIR_ADD::next available data block number is %d. Actual block # in disk is %d\n", dblock_num, SUPERBLOCK->d_start_blk + dblock_num);
     bio_write(SUPERBLOCK->d_start_blk + dblock_num, (void*)new_directory_entry);
 
@@ -357,14 +365,17 @@ get_node_by_path(const char* path, uint16_t ino, struct inode* inode)
   }
 
   // find the dirent we are at, since we haven't found the terminal inode yet
-  struct dirent* cur_dirent = calloc(1, sizeof(struct dirent));
+  struct dirent* cur_dirent = malloc(sizeof(struct dirent));
   int status = dir_find(ino, token, sizeof(token), cur_dirent);
   if (status == NO_DIR_FOUND) {
     printf("GET_NODE_BY_PATH:: get_node_by_path didn't find node for the path!\n");
+    free(cur_dirent);
     return NO_INODE_FOUND;
   }
 
-  return get_node_by_path(path, cur_dirent->ino, inode);
+  int new_ino = cur_dirent->ino;
+  free(cur_dirent);
+  return get_node_by_path(path, new_ino, inode);
 }
 
 /*
@@ -440,28 +451,29 @@ tfs_mkfs()
 
   // Allocate all inodes, initialize their ptrs and state to invalid, and write
   // to disk. Note, we start at 1 because we write the root dir node (ino 1) at
-  // the end of this function anyway for(int i = 1; i < MAX_INUM; i++) {
-  //   struct inode* inode = malloc(BLOCK_SIZE);
-  //   memset(inode, 0, BLOCK_SIZE);
-  //        inode[i].valid = INVALID;
+  // the end of this function anyway 
+  for(int i = 1; i < MAX_INUM; i++) {
+      struct inode* inode = malloc(sizeof(struct inode));
+      memset(inode, 0, sizeof(struct inode));
+      inode->valid = INVALID;
 
-  //     // Set all direct links to invalid
-  //     for (int k = 0; k < DIRECT_POINTER_LIST_NUM; k++)
-  //       inode[i].direct_ptr[k] = INVALID_LINK;
+       // Set all direct links to invalid
+      for (int k = 0; k < DIRECT_POINTER_LIST_NUM; k++)
+        inode->direct_ptr[k] = INVALID_LINK;
 
-  //     // Set all indirect links to invalid
-  //     for (int k = 0; k < INDIRECT_POINTER_LIST_NUM; k++)
-  //       inode[i].indirect_ptr[k] = INVALID_LINK;
+      // Set all indirect links to invalid
+      for (int k = 0; k < INDIRECT_POINTER_LIST_NUM; k++)
+        inode->indirect_ptr[k] = INVALID_LINK;
 
-  //     inode[i].ino = i;
+      inode->ino = i;
 
-  //   // Write inode block to disk
-  //   writei(i, inode);
-  //   free(inode);
-  // }
+    // Write inode block to disk
+    writei(i, inode);
+    free(inode);
+  }
 
   // update inode for root directory
-  struct inode* root_dir_inode = (struct inode*)malloc(sizeof(struct inode));
+  struct inode* root_dir_inode = malloc(sizeof(struct inode));
   if (root_dir_inode == NULL) {
     perror("ERROR:: Unable to allocate the root directory inode.");
     exit(-1);
@@ -481,12 +493,12 @@ tfs_mkfs()
   }
 
   struct stat* buff;
-  int stat_result = stat("/", buff);
+  int stat_result = stat("./", buff);
   if (buff == NULL) {
     perror("ERROR:: Unable to build a stat structure.");
-    exit(-1);
+    //exit(-1);
   }
-  root_dir_inode->vstat = *buff;
+  //root_dir_inode->vstat = *buff;
 
   writei(ROOT_INODE_NUMBER, (void*)(root_dir_inode));
   
@@ -495,6 +507,14 @@ tfs_mkfs()
   int dot_ino = get_avail_ino();
   dir_add(*root_dir_inode, dot_ino, ".", 2); 
 
+  // first 2 data blocks are filled now, so update bitmap
+  set_bitmap(DBLOCK_BITMAP, 0);
+  bio_write(SUPERBLOCK->d_bitmap_blk, (void*)DBLOCK_BITMAP);
+  set_bitmap(INODE_BITMAP, 0);
+  set_bitmap(INODE_BITMAP, dot_ino);
+  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
+  
+  free(root_dir_inode);
   // TESTING
   struct inode test;
   readi(0, &test);
@@ -531,7 +551,7 @@ tfs_init(struct fuse_conn_info* conn)
   }
 
   if (!SUPERBLOCK) {
-    void* buf = malloc(sizeof(struct superblock*));
+    void* buf = malloc(BLOCK_SIZE);
     bio_read(0, buf);
     SUPERBLOCK = (struct superblock*)buf;
     free(buf);
@@ -566,7 +586,7 @@ tfs_getattr(const char* path, struct stat* stbuf)
   }
 
   printf("GETATTR::Found inode for the file!\n");
-
+  
   if (inode.type == DIRECTORY) {
     stbuf->st_mode = S_IFDIR | 0755;
     stbuf->st_nlink = 1; // . entry
@@ -620,7 +640,6 @@ tfs_readdir(const char* path,
       bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i], data_block);
       struct dirent* dirent = (struct dirent*)data_block;
       filler(buffer, dirent->name, NULL, 0);
-      
     }
   }
 
@@ -685,9 +704,9 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   // Step 1: Use dirname() and basename() to separate parent directory path and
   // target file name. entry
   // This won't work without a strcpy, it fucks up the ptr value
-  //char* path_copy = calloc(1, strlen(path) + 1);
-  //strcpy(path_copy, path);
-  char* directory_name = dirname(path);
+  char* path_copy = calloc(1, strlen(path) + 1);
+  strcpy(path_copy, path);
+  char* directory_name = dirname(path_copy);
   char* base_name = basename(path);
 
   printf("CREATE:: directory_name = %s, base_name = %s\n",
@@ -698,11 +717,11 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   struct inode parent_dir_inode;
   get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_dir_inode);
 
-  printf("MALLOC ISSUES IN GET_NODE_PATH!\n");
 
   // Step 3: Call get_avail_ino() to get an available inode number
   int file_ino = get_avail_ino(); 
-
+  set_bitmap(INODE_BITMAP, file_ino);
+  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
   // Step 4: Call dir_add() to add directory entry of target file to parent
   // directory
   dir_add(parent_dir_inode,
@@ -715,7 +734,8 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   new_file_inode.ino = file_ino;
   new_file_inode.valid = VALID;
   new_file_inode.size = 0;
-  new_file_inode.link = 0;
+  new_file_inode.link = 1;
+  new_file_inode.type = FILE;
   for (int i = 0; i < INDIRECT_POINTER_LIST_NUM; i++) {
     new_file_inode.indirect_ptr[i] = INVALID_LINK;
   }
@@ -723,6 +743,7 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
     new_file_inode.direct_ptr[i] = INVALID_LINK;
   }
+  
 
   struct stat* buff;
   int stat_result = stat(path, buff);
@@ -732,8 +753,10 @@ tfs_create(const char* path, mode_t mode, struct fuse_file_info* fi)
   }
   new_file_inode.vstat = *buff;
   // Step 6: Call writei() to write inode to disk
+
   writei(file_ino, &new_file_inode);
 
+  printf("CREATE::Successully created!\n");
   return 0;
 }
 
