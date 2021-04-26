@@ -83,6 +83,7 @@ get_avail_ino()
 
   // Step 3: Update inode bitmap and write to disk
   set_bitmap(INODE_BITMAP, idx);
+  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
   for (int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++) {
     bio_write(SUPERBLOCK->i_bitmap_blk + i,
               INODE_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
@@ -248,10 +249,9 @@ dir_find(uint16_t ino,
 
     // if the names match, then this is the one we are looking for
     if (strcmp(entry->name, fname) == 0) {
-      memcpy(dirent, entry, sizeof(entry));
+      memcpy(dirent, entry, sizeof(struct dirent));
       return FOUND_DIR;
     }
-
     // TODO check indirect ptrs too
   }
 
@@ -278,16 +278,16 @@ dir_add(struct inode dir_inode,
     }
       
     // Read the data block
-    // void* data_block = calloc(1, BLOCK_SIZE);
-    // bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[idx_of_first_invalid], data_block);
+    void* data_block = calloc(1, BLOCK_SIZE);
+    bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[idx_of_first_invalid], data_block);
 
-    // // Step 2: Check if fname (directory name) is already used in other entries
-    // struct dirent* directory = (struct dirent*)data_block;
+    // Step 2: Check if fname (directory name) is already used in other entries
+    struct dirent* directory = (struct dirent*)data_block;
 
-    // if (strcmp(directory->name, fname) == 0) {
-    //   perror("ERROF:: The directory entry already exists. Please rename and try again.");
-    //   return 0;
-    // }
+    if (strcmp(directory->name, fname) == 0) {
+      perror("ERROF:: The directory entry already exists. Please rename and try again.");
+      return 0;
+    }
   }
 
   // Step 3: Add directory entry in dir_inode's data block and write to disk
@@ -314,7 +314,7 @@ dir_add(struct inode dir_inode,
     dir_inode.direct_ptr[idx_of_first_invalid] = dblock_num;
     writei(dir_inode.ino, (void*)&dir_inode);
     
-    free(new_directory_entry);
+    //free(new_directory_entry);
     //TODO We have not touched indirect pointers yet, so I'm just making nothing happen if a directory's direct pointers are filled
   }else{
     perror("ERROR:: The creation of this file will require indirect directory pointers, which we have not implemented.");
@@ -483,7 +483,7 @@ tfs_mkfs()
   root_dir_inode->valid = 1;
   root_dir_inode->size = sizeof(root_dir_inode);
   root_dir_inode->type = DIRECTORY;
-  root_dir_inode->link = 0;
+  root_dir_inode->link = 1;
   for (int i = 0; i < INDIRECT_POINTER_LIST_NUM; i++) {
     root_dir_inode->indirect_ptr[i] = INVALID_LINK;
   }
@@ -599,6 +599,7 @@ tfs_getattr(const char* path, struct stat* stbuf)
   stbuf->st_uid = getuid();
   stbuf->st_gid = getgid();
   time(&stbuf->st_mtime);
+  stbuf->st_ino = inode.ino;
 
   return FOUND_INODE;
 }
@@ -630,18 +631,21 @@ tfs_readdir(const char* path,
     exit(-1);
   }
 
+  
+  void* data_block = malloc(BLOCK_SIZE);
   for (int i = 0; i < DIRECT_POINTER_LIST_NUM; i++) {
+    memset(data_block, 0, BLOCK_SIZE);  
     if (dir_inode.direct_ptr[i] != INVALID_LINK) {
       printf("READDIR:: direct ptr valid with value %d\n", dir_inode.direct_ptr[i]);
 
       // get the dirent from the inode
-      void* data_block = malloc(BLOCK_SIZE);
       printf("READDIR:: reading from %d\n",SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i]);
       bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i], data_block);
       struct dirent* dirent = (struct dirent*)data_block;
       filler(buffer, dirent->name, NULL, 0);
-    }
+     }
   }
+  //free(data_block);
 
   // TODO support indirect ptrs
 
