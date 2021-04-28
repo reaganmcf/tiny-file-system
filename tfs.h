@@ -17,6 +17,12 @@
 #define MAX_INUM 1024
 #define MAX_DNUM 16384
 
+#define VALID 1
+#define INVALID 0
+
+#define FILE 0
+#define FOLDER 1
+
 
 struct superblock {
 	uint32_t	magic_num;			/* magic number */
@@ -46,6 +52,9 @@ struct dirent {
 	uint16_t len;					/* length of name */
 };
 
+
+void write_inode_bitmap();
+struct inode* create_inode(char* path, uint16_t ino, uint32_t type, uint8_t is_valid, int link);
 
 /*
  * bitmap operations

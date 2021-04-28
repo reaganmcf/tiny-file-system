@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <libgen.h>
 #include <limits.h>
+#include <math.h>
 
 #include "block.h"
 #include "tfs.h"
@@ -25,6 +26,33 @@
 char diskfile_path[PATH_MAX];
 
 // Declare your in-memory data structures here
+
+volatile struct superblock* SUPERBLOCK;
+bitmap_t INODE_BITMAP;
+bitmap_t DBLOCK_BITMAP;
+
+int diskfile_found = 0;
+
+int SUPERBLOCK_SIZE_IN_BLOCKS;
+int INODE_BITMAP_SIZE_IN_BLOCKS;
+int DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+int INODE_TABLE_SIZE_IN_BLOCKS;
+int BLOCK_SIZE_IN_CHARACTERS;
+int INODES_PER_BLOCK;
+
+/**
+ * Write the inode bitmap
+ */
+void write_inode_bitmap() {
+  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP) ;
+}
+
+/**
+ * Write the dblock bitmap
+ */
+void write_dblock_bitmap() {
+  bio_write(SUPERBLOCK->d_bitmap_blk, (void*)DBLOCK_BITMAP);
+}
 
 /* 
  * Get available inode number from bitmap
@@ -59,24 +87,65 @@ int get_avail_blkno() {
  */
 int readi(uint16_t ino, struct inode *inode) {
 
-  // Step 1: Get the inode's on-disk block number
+	// Step 1: Get the inode's on-disk block number
+	if (SUPERBLOCK == NULL) {
+		perror("ERROR:: Superblock is NULL.");
+		exit(-1);
+	}
 
-  // Step 2: Get offset of the inode in the inode on-disk block
+	int block_number = SUPERBLOCK->i_start_blk + ino / INODES_PER_BLOCK;
 
-  // Step 3: Read the block from disk and then copy into inode structure
+	// Step 2: Get offset of the inode in the inode on-disk block
+	int offset = ino % INODES_PER_BLOCK;
 
-	return 0;
+	// Step 3: Read the block from disk and then copy into inode structure
+	void* buf = malloc(BLOCK_SIZE);
+	bio_read(block_number, buf);
+	if (buf == NULL) {
+		perror("ERROR:: Could not read inode from inode table");
+		exit(-1);
+	}
+
+	struct inode* block_of_inodes = (struct inode*)buf;
+	printf("READI:: ino = %d, block num = %d, offset = %d\n",
+			ino,
+			block_number,
+			offset);
+
+	*inode = block_of_inodes[offset];
+	free(buf);
+	return 1;
 }
 
 int writei(uint16_t ino, struct inode *inode) {
 
 	// Step 1: Get the block number where this inode resides on disk
+	if (SUPERBLOCK == NULL) {
+		perror("ERROR:: Superblock is NULL.");
+		exit(-1);
+	}
+	int block_number = SUPERBLOCK->i_start_blk + ino / INODES_PER_BLOCK;
 	
 	// Step 2: Get the offset in the block where this inode resides on disk
+	int offset = ino % INODES_PER_BLOCK;
 
 	// Step 3: Write inode to disk 
+	void* buf = malloc(BLOCK_SIZE);
+	bio_read(block_number, buf);
+	if (buf == NULL) {
+		perror("ERROR:: Could not read inode from inode table");
+		exit(-1);
+	}
+	struct inode* block_of_inodes = (struct inode*)buf;
+	printf("WRITEI:: ino = %d, block num = %d, offset = %d\n",
+			ino,
+			block_number,
+			offset);
+	block_of_inodes[offset] = *(inode);
 
-	return 0;
+	bio_write(block_number, (void*)block_of_inodes);
+	free(buf);
+	return 1;
 }
 
 
@@ -139,17 +208,56 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  */
 int tfs_mkfs() {
 
-	// Call dev_init() to initialize (Create) Diskfile
+	SUPERBLOCK_SIZE_IN_BLOCKS = ceil(sizeof(struct superblock) / BLOCK_SIZE);
+	INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
+	DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
+	INODES_PER_BLOCK = ceil((double)BLOCK_SIZE / sizeof(struct inode));
+	INODE_TABLE_SIZE_IN_BLOCKS = ceil(MAX_INUM / INODES_PER_BLOCK);
+	BLOCK_SIZE_IN_CHARACTERS = ceil(BLOCK_SIZE / 8);
 
-	// write superblock information
+	// Call dev_init() to initialize (Create) Diskfile
+	dev_init(diskfile_path);
+  	diskfile_found = 1;
+
+ 	// write superblock information
+	SUPERBLOCK = (struct superblock*)malloc(sizeof(struct superblock));
+	if(SUPERBLOCK == NULL) {
+		perror("ERROR:: Unable to allocate the superblock!");
+		exit(-1);
+	}
+	SUPERBLOCK->magic_num = MAGIC_NUM;
+	SUPERBLOCK->max_inum = MAX_INUM;
+	SUPERBLOCK->max_dnum = MAX_DNUM;
+	SUPERBLOCK->i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
+	SUPERBLOCK->d_bitmap_blk = SUPERBLOCK->i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
+	SUPERBLOCK->i_start_blk = SUPERBLOCK->d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+	SUPERBLOCK->d_start_blk = SUPERBLOCK->i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
+	bio_write(0, (void*)SUPERBLOCK);
 
 	// initialize inode bitmap
+	INODE_BITMAP = (bitmap_t)malloc(MAX_INUM / 8);
+  	write_inode_bitmap();
 
 	// initialize data block bitmap
+	DBLOCK_BITMAP = (bitmap_t)malloc(MAX_DNUM / 8);
+	write_dblock_bitmap();
+
+	// allocate all the inodes and write them in the disk   
+	for(int i = 0; i < MAX_INUM; i++) {
+		struct inode* inode = create_inode("", i, FILE, INVALID, 0);
+		writei(i, inode);
+		free(inode);
+	}
 
 	// update bitmap information for root directory
+	set_bitmap(INODE_BITMAP, 0);
+  	write_inode_bitmap();
 
 	// update inode for root directory
+	struct inode* root_inode = create_inode("/", 0, 1, VALID, 1);
+	writei(0, root_inode);
+	
+	
 
 	return 0;
 }
@@ -377,3 +485,26 @@ int main(int argc, char *argv[]) {
 	return fuse_stat;
 }
 
+struct inode* create_inode(char* path, uint16_t ino, uint32_t type, uint8_t is_valid, int link){
+	struct inode* new_inode = malloc(sizeof(struct inode));
+ 	memset(new_inode, 0, sizeof(struct inode));
+	new_inode->ino = ino;
+	new_inode->valid = is_valid;
+	new_inode->size = 0;
+	new_inode->link = link;
+	for(int i = 0; i < 16; i++){
+	  new_inode->direct_ptr[i] = INVALID;
+	}
+	for(int i = 0; i < 8; i++){
+		new_inode->indirect_ptr[i] = INVALID;
+	}
+	// struct stat* buff;
+	// int stat_result = stat(path, buff);
+	// if (buff == NULL) {
+	// 	perror("ERROR:: Unable to build a stat structure.");
+	// 	exit(-1);
+	// }
+	// new_inode.vstat = *buff;
+	return new_inode;
+	
+}
