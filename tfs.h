@@ -9,7 +9,6 @@
 #include <linux/limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdint.h>
 
 #ifndef _TFS_H
 #define _TFS_H
@@ -17,21 +16,7 @@
 #define MAGIC_NUM 0x5C3A
 #define MAX_INUM 1024
 #define MAX_DNUM 16384
-#define ROOT_INODE_NUMBER 0
 
-#define DIRECTORY 0
-#define FILE 1
-#define INVALID_LINK -1
-#define DIRECT_POINTER_LIST_NUM 16
-#define INDIRECT_POINTER_LIST_NUM 8
-
-// Codes
-#define FOUND_INODE 0
-#define NO_INODE_FOUND -1
-#define INVALID 0
-#define VALID 1
-#define FOUND_DIR 0
-#define NO_DIR_FOUND 1
 
 struct superblock {
 	uint32_t	magic_num;			/* magic number */
@@ -60,6 +45,7 @@ struct dirent {
 	char name[208];					/* name of the directory entry */
 	uint16_t len;					/* length of name */
 };
+
 
 /*
  * bitmap operations
