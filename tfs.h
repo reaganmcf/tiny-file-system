@@ -16,12 +16,25 @@
 #define MAGIC_NUM 0x5C3A
 #define MAX_INUM 1024
 #define MAX_DNUM 16384
+#define ROOT_INODE_NUMBER 0
 
 #define VALID 1
 #define INVALID 0
+#define INVALID_PTR -1
 
 #define FILE 0
 #define FOLDER 1
+
+#define DIRECT_PTR_NUM 16
+#define INDIRECT_PTR_NUM 8
+
+#define FILE_ALREADY_EXISTS -1
+#define FILE_ADDED_SUCCESSFULLY 1
+#define NO_MORE_SPACE_FOR_DIRENTS -2
+
+#define FOUND_INODE 1
+#define NO_DIR_FOUND -2
+#define NO_INODE_FOUND -1
 
 
 struct superblock {
