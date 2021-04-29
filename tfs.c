@@ -307,7 +307,6 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 					}
 				}
 			}
-
 		}	
 	}
 
@@ -333,7 +332,8 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 			bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[direct_ptr_index], dirent_block);
 
 			for(dirent_index = 0; dirent_index < DIRENTS_PER_BLOCK && still_searching; dirent_index++) {
-				if(dirent_block[dirent_index].valid == INVALID){
+				if(dirent_block[dirent_index].valid == INVALID) {
+          printf("dir_add:: first invalid dirent is at [%d][%d]\n", direct_ptr_index, dirent_index);
 					still_searching = 0;
 					found_block = dirent_block;
 				}
@@ -360,11 +360,13 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 		
     // We didn't find a spot in the valid dirent blocks, so make a new one!
 		int new_dirent_block_no = get_avail_blkno(); 
+    set_bitmap(DBLOCK_BITMAP, new_dirent_block_no);
+    write_dblock_bitmap();
 		
     // find first invalid direct ptr index
 		int first_invalid_direct_ptr_index = -1;
 		for(int i = 0; i < DIRECT_PTR_NUM; i++) {
-			if(dir_inode.direct_ptr[i] == INVALID) {
+			if(dir_inode.direct_ptr[i] == INVALID_PTR) {
 				first_invalid_direct_ptr_index = i;
 				break;
 			}
@@ -452,7 +454,7 @@ int tfs_mkfs() {
 	INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
 	DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
 	INODES_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct inode));
-  	DIRENTS_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct dirent));
+  DIRENTS_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct dirent));
 	INODE_TABLE_SIZE_IN_BLOCKS = ceil(MAX_INUM / INODES_PER_BLOCK);
 	BLOCK_SIZE_IN_CHARACTERS = ceil(BLOCK_SIZE / 8);
 
@@ -510,8 +512,12 @@ int tfs_mkfs() {
 
 	// update inode for root directory
 	struct inode* root_inode = create_inode("/", 0, FOLDER, VALID, 2); // this has 2 links because "." points to this inode as well
-	// root directory's first direct ptr should point to a block of dirents
-	int root_dirent_block_no = get_avail_blkno(); 
+
+  // root directory's first direct ptr should point to a block of dirents	
+  int root_dirent_block_no = get_avail_blkno(); 
+  set_bitmap(DBLOCK_BITMAP, root_dirent_block_no);
+  write_dblock_bitmap();
+
 	root_inode->direct_ptr[0] = root_dirent_block_no;
 	format_block_as_dirents(root_dirent_block_no);
 	writei(0, root_inode);
@@ -562,8 +568,12 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 static void tfs_destroy(void *userdata) {
 
 	// Step 1: De-allocate in-memory data structures
+  free(SUPERBLOCK);
+  free(INODE_BITMAP);
+  free(DBLOCK_BITMAP);
 
 	// Step 2: Close diskfile
+  dev_close();
 
 }
 
