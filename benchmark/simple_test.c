@@ -9,7 +9,7 @@
 #include <dirent.h>
 
 /* You need to change this macro to your TFS mount point*/
-#define TESTDIR "/tmp/rmcf/mountdir"
+#define TESTDIR "/tmp/mountdir"
 
 #define N_FILES 100
 #define BLOCKSIZE 4096
@@ -21,7 +21,6 @@
 char buf[BLOCKSIZE];
 
 int main(int argc, char **argv) {
-	
 
 	int i, fd = 0, ret = 0;
 	struct stat st;
