@@ -250,13 +250,44 @@ int writei(uint16_t ino, struct inode *inode) {
 int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *dirent) {
 
   // Step 1: Call readi() to get the inode using ino (inode number of current directory)
+  struct inode cur_inode;
+  readi(ino, &cur_inode);
+
 
   // Step 2: Get data block of current directory from inode
+  
+  void *buf = malloc(BLOCK_SIZE);
+  for(int direct_ptr_index = 0; direct_ptr_index < DIRECT_PTR_NUM; direct_ptr_index++) {
+    // If the direct ptr is valid (i.e., pointing to the dblock that contains dirents)
+    if(cur_inode.direct_ptr[direct_ptr_index] != INVALID_PTR) {
+	    bio_read(SUPERBLOCK->d_start_blk + cur_inode.direct_ptr[direct_ptr_index], buf);
+	    struct dirent* block_of_dirents = (struct dirent*)buf;
 
-  // Step 3: Read directory's data block and check each directory entry.
-  //If the name matches, then copy directory entry to dirent structure
+      // Safety check: this should never happen but just incase
+	    if(block_of_dirents == NULL){
+		    perror("ERROR:: Could not read data block");
+		    exit(-1);
+	    }
+      
+      // Step 3: Read directory's data block and check each directory entry.
+      for(int dirent_index = 0; dirent_index < DIRENTS_PER_BLOCK; dirent_index++) {
+        struct dirent cur_dirent = block_of_dirents[dirent_index];
+        if(cur_dirent.valid == VALID) { 
+          //If the name matches, then copy directory entry to dirent structure
+          if(strncmp(fname, cur_dirent.name, name_len) == 0) {
+            *dirent = cur_dirent;
+            
+            free(buf);
+            return DIRENT_FOUND;
+          }
+        }
+      }
+    }
+  }
 
-	return 0;
+  // If we get all the way to here, then no dirent was found
+  free(buf);
+	return NO_DIRENT_FOUND;
 }
 
 int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
@@ -265,7 +296,6 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	for(int i = 0; i < DIRECT_PTR_NUM; i++) {
 		if(dir_inode.direct_ptr[i] != INVALID_PTR) {
 			void *tmp = malloc(BLOCK_SIZE);
-			printf("here\n");
 			bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i], tmp);
 			struct dirent *dirent_block = (struct dirent*) tmp;			
 
@@ -283,7 +313,7 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 
 	// Step 3: Add directory entry in dir_inode's data block and write to disk
 	int direct_ptr_index = 0;
-	int j = 0;
+	int dirent_index = 0;
 	int still_searching = 1;
 	struct dirent* found_block;
 
@@ -291,8 +321,9 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 		if(still_searching == 0){
 
       // since we found the direct ptr index on the LAST iteration, we need to reset
-      // direct_ptr_index to what it was LAST iteration
+      // direct_ptr_index to what it was LAST iteration, as well as dirent_index
       direct_ptr_index--;
+      dirent_index--;
 
 			break;
 		}
@@ -301,8 +332,8 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 			struct dirent *dirent_block = (struct dirent*)malloc(BLOCK_SIZE);
 			bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[direct_ptr_index], dirent_block);
 
-			for(j = 0; j < DIRENTS_PER_BLOCK && still_searching; j++) {
-				if(dirent_block[j].valid == INVALID){
+			for(dirent_index = 0; dirent_index < DIRENTS_PER_BLOCK && still_searching; dirent_index++) {
+				if(dirent_block[dirent_index].valid == INVALID){
 					still_searching = 0;
 					found_block = dirent_block;
 				}
@@ -314,10 +345,10 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	if(still_searching == 0) {
 
     printf("dir_add:: we found a spot in an already allocated dirent block!\n");
-    found_block[j].len = name_len;
-		strcpy(found_block[j].name, fname);
-		found_block[j].ino = f_ino;
-		found_block[j].valid = VALID;
+    found_block[dirent_index].len = name_len;
+		strcpy(found_block[dirent_index].name, fname);
+		found_block[dirent_index].ino = f_ino;
+		found_block[dirent_index].valid = VALID;
 
     // write the dirent block back to disk
     printf("dir_add:: direct_ptr_index = %d, dirent data block is at offset %d\n", direct_ptr_index, dir_inode.direct_ptr[direct_ptr_index]);
@@ -377,12 +408,39 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// inode. Note: You could either implement it in a iterative way or recursive
 	// way get inode struct corresponding to it
 
-  if(strcmp(path, "/") == 0) {
-    // this is the root node
-    readi(0, inode);
+  // Read the inode given the inode number
+  readi(ino, inode);
+
+  // get the next token in the path, setting path to the remaining path str
+  //    i.e., if path is /foo/bar, then token will be "foo" and path will now be "/bar"
+  char *token = strtok_r(path, "/", &path);
+  printf("GET_NODE_BY_PATH:: token = %s\n", token);
+
+  // if the token is null, there is no more path to walk through.
+  // Therefore, we know we found the inode if inode->valid == VALID or not
+  if(token == NULL) {
+    if (inode->valid == VALID)
+      return FOUND_INODE;
+    return NO_INODE_FOUND;
   }
 
-	return 0;
+  // If the token is not NULL, then we still have more path to walk (so the latest token of the path must be a directory)
+  // We first need to ensure that the current token of the path is actually inside of the current directory
+  // that is, some dirent entry in one of the directories data blocks
+  struct dirent *cur_dirent = malloc(sizeof(struct dirent));
+  int status = dir_find(ino, token, strlen(token) + 1, cur_dirent);
+  
+  // If no corresponding dirent was found for this path, then there is no corresponding inode and we should return
+  if (status == NO_DIRENT_FOUND) {
+    printf("GET_NODE_BY_PATH:: no dirent for the token!\n");
+    free(cur_dirent);
+    return NO_INODE_FOUND;
+  }
+
+  // If a corresponding dirent WAS found ,then we need to recursively call this function on the dirent
+  int new_ino = cur_dirent->ino;
+  free(cur_dirent);
+  return get_node_by_path(path, new_ino, inode);
 }
 
 /* 
@@ -451,7 +509,7 @@ int tfs_mkfs() {
 	write_inode_bitmap();
 
 	// update inode for root directory
-	struct inode* root_inode = create_inode("/", 0, 1, VALID, 2); // this has 2 links because "." points to this inode as well
+	struct inode* root_inode = create_inode("/", 0, FOLDER, VALID, 2); // this has 2 links because "." points to this inode as well
 	// root directory's first direct ptr should point to a block of dirents
 	int root_dirent_block_no = get_avail_blkno(); 
 	root_inode->direct_ptr[0] = root_dirent_block_no;
@@ -512,14 +570,30 @@ static void tfs_destroy(void *userdata) {
 static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 	// Step 1: call get_node_by_path() to get inode from path
+  struct inode inode;
+  int status = get_node_by_path(path, ROOT_INODE_NUMBER, &inode);
+  if (status == NO_INODE_FOUND) {
+    printf("GETATTR:: Couldn't find inode for the path!\n");
+    return -ENOENT;
+  }
+
+  printf("GETATTR:: Found inode for the file!\n");
+  
+  if(inode.type == FOLDER) {
+    stbuf->st_mode = S_IFDIR | 0755;
+    stbuf->st_nlink = 2; //. and itself
+  } else {
+    stbuf->st_mode = S_IFREG | 0644;
+    stbuf->st_nlink = 1; // ?
+  }
 
 	// Step 2: fill attribute of file into stbuf from inode
 
-	stbuf->st_mode   = S_IFDIR | 0755;
-	stbuf->st_nlink  = 2;
+  stbuf->st_uid = getuid();
+  stbuf->st_gid = getgid();
 	time(&stbuf->st_mtime);
 
-	return 0;
+	return FOUND_INODE;
 }
 
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
@@ -607,15 +681,37 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
+  // Note: this won't work without a strcpy because it fucks with the path ptr
+  char *path_copy = calloc(1, strlen(path) + 1);
+  strcpy(path_copy, path);
+  char* directory_name = dirname(path_copy);
+  char* base_name = basename(path);
+
+  printf("CREATE:: directory_name = %s, base_name = %s\n",
+         directory_name,
+         base_name);
+
 	// Step 2: Call get_node_by_path() to get inode of parent directory
+  struct inode parent_dir_inode;
+  get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_dir_inode);
 
 	// Step 3: Call get_avail_ino() to get an available inode number
+  int file_ino = get_avail_ino();
+  set_bitmap(INODE_BITMAP, file_ino);
+  write_inode_bitmap();
 
 	// Step 4: Call dir_add() to add directory entry of target file to parent directory
+  dir_add(parent_dir_inode, file_ino, base_name, strlen(base_name) + 1);
 
 	// Step 5: Update inode for target file
+    // TODO passing in the entire path here is weird because we already split it up...
+    // string concat in C is ugly
+  struct inode* new_file_inode = create_inode(NULL, file_ino, FILE, VALID, 1);
+  printf("create:: path at the end is %s\n", path);
 
-	// Step 6: Call writei() to write inode to disk
+	// Step 6: Call writei() to write new inode to disk
+  writei(file_ino, new_file_inode);
+  free(new_file_inode);
 
 	return 0;
 }

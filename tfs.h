@@ -32,9 +32,12 @@
 #define FILE_ADDED_SUCCESSFULLY 1
 #define NO_MORE_SPACE_FOR_DIRENTS -2
 
-#define FOUND_INODE 1
+#define FOUND_INODE 0
 #define NO_DIR_FOUND -2
 #define NO_INODE_FOUND -1
+
+#define DIRENT_FOUND 0
+#define NO_DIRENT_FOUND -1
 
 
 struct superblock {
