@@ -344,6 +344,8 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	// Allocate a new data block for this directory if it does not exist
 	if(still_searching == 0) {
 
+    printf("dir_add::\t%s\n", fname);
+
     printf("dir_add:: we found a spot in an already allocated dirent block!\n");
     found_block[dirent_index].len = name_len;
 		strcpy(found_block[dirent_index].name, fname);
@@ -355,7 +357,6 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
     bio_write(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[direct_ptr_index], (void*)found_block);
 		return FILE_ADDED_SUCCESSFULLY;
 	} else {
-
     printf("dir_add having to make a new dirent block!\n");
 		
     // We didn't find a spot in the valid dirent blocks, so make a new one!
@@ -609,10 +610,14 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
+  struct inode dir_inode;
+  int status = get_node_by_path(path, ROOT_INODE_NUMBER, &dir_inode);
 
 	// Step 2: If not find, return -1
-
+  if(status == FOUND_INODE)
     return 0;
+  
+  return -1;
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
@@ -649,19 +654,44 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 static int tfs_mkdir(const char *path, mode_t mode) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
+  // Note: this won't work without a strcpy because it fucks with the path ptr
+  char *path_copy = calloc(1, strlen(path) + 1);
+  strcpy(path_copy, path);
+  char* directory_name = dirname(path_copy);
+  char* base_name = basename(path);
+
+  printf("MKDIR:: directory_name = %s, base_name = %s\n",
+         directory_name,
+         base_name);
 
 	// Step 2: Call get_node_by_path() to get inode of parent directory
+  struct inode parent_dir_inode;
+  get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_dir_inode);
 
 	// Step 3: Call get_avail_ino() to get an available inode number
+  int dir_ino = get_avail_ino();
+  set_bitmap(INODE_BITMAP, dir_ino);
+  write_inode_bitmap();
 
-	// Step 4: Call dir_add() to add directory entry of target directory to parent directory
+	// Step 4: Call dir_add() to add directory entry of target file to parent directory
+  dir_add(parent_dir_inode, dir_ino, base_name, strlen(base_name) + 1);
 
-	// Step 5: Update inode for target directory
+	// Step 5: Update inode for target directory and write it to disk
+  struct inode* new_dir_inode = create_inode(path, dir_ino, FOLDER, VALID, 2);
+  writei(dir_ino, new_dir_inode);
 
-	// Step 6: Call writei() to write inode to disk
-	
+  // add the "." for the new dir
+  dir_add(*new_dir_inode, dir_ino, ".", 2);
 
-	return 0;
+  // Note, we have to re-read since we just wrote a dir_add to disk for this inode
+  readi(dir_ino, new_dir_inode);
+
+  // add the ".." for the parent inode
+  dir_add(*new_dir_inode, parent_dir_inode.ino, "..", 3);
+
+  free(new_dir_inode);
+
+  return 0;
 }
 
 static int tfs_rmdir(const char *path) {
@@ -684,7 +714,7 @@ static int tfs_rmdir(const char *path) {
 static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
 	// For this project, you don't need to fill this function
 	// But DO NOT DELETE IT!
-    return 0;
+  return 0;
 }
 
 static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
@@ -714,16 +744,13 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
   dir_add(parent_dir_inode, file_ino, base_name, strlen(base_name) + 1);
 
 	// Step 5: Update inode for target file
-    // TODO passing in the entire path here is weird because we already split it up...
-    // string concat in C is ugly
-  struct inode* new_file_inode = create_inode(NULL, file_ino, FILE, VALID, 1);
-  printf("create:: path at the end is %s\n", path);
+  struct inode* new_file_inode = create_inode(path, file_ino, FILE, VALID, 1);
 
 	// Step 6: Call writei() to write new inode to disk
   writei(file_ino, new_file_inode);
   free(new_file_inode);
 
-	return 0;
+  return 0;
 }
 
 static int tfs_open(const char *path, struct fuse_file_info *fi) {
