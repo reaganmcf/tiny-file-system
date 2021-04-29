@@ -1,4 +1,8 @@
-# tiny_file_system
+<p align="center">
+  <img src="https://www.cs.rutgers.edu/~pxk/416/notes/images/13-ufs.png"/>
+</p>
+
+# tiny-file-system
 A small file system inspired by `ext2` using FUSE, written in C.
 
 ## Development
