@@ -1,5 +1,5 @@
 # tiny_file_system
-A small file system inspired by `ext3` using FUSE, written in C.
+A small file system inspired by `ext2` using FUSE, written in C.
 
 ## Development
 
