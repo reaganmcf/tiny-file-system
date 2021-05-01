@@ -393,12 +393,31 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 
 	// Step 1: Read dir_inode's data block and checks each directory entry of dir_inode
-	
-	// Step 2: Check if fname exist
+	for(int i = 0; i < DIRECT_PTR_NUM; i++) {
+		if(dir_inode.direct_ptr[i] != INVALID_PTR) {
+			void *tmp = malloc(BLOCK_SIZE);
+			bio_read(SUPERBLOCK->d_start_blk + dir_inode.direct_ptr[i], tmp);
+			struct dirent *dirent_block = (struct dirent*) tmp;			
 
-	// Step 3: If exist, then remove it from dir_inode's data block and write to disk
+			// Step 2: Check if fname exist
+			for(int j = 0; j < DIRENTS_PER_BLOCK; j++) {
+				if(dirent_block[j].valid == VALID){
+					if(strcmp(dirent_block[j].name, fname) == 0) {
+            			// Step 3: If exist, then remove it from dir_inode's data block and write to disk
+						struct dirent* new_dirent = (struct dirent*)malloc(sizeof(struct dirent));
+						memset(new_dirent, 0, sizeof(struct dirent));
+						new_dirent->ino = 0;
+						new_dirent->valid = INVALID;
+						new_dirent->len = 0;
+						write_dirent(dir_inode.direct_ptr[i], j, new_dirent);
+						free(new_dirent);
+					}
+				}
+			}
+		}	
+	}
 
-	return 0;
+	return 1;
 }
 
 /* 
@@ -698,16 +717,39 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 static int tfs_rmdir(const char *path) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
+	char *path_copy = calloc(1, strlen(path) + 1);
+	strcpy(path_copy, path);
+	char* directory_name = dirname(path_copy);
+	char* base_name = basename(path);
+
+	printf("MKDIR:: directory_name = %s, base_name = %s\n",
+			directory_name,
+			base_name);
 
 	// Step 2: Call get_node_by_path() to get inode of target directory
+	struct inode target_dir_inode;
+  	if(get_node_by_path(path, ROOT_INODE_NUMBER, &target_dir_inode) == NO_INODE_FOUND){
+		return -1;
+	}
 
 	// Step 3: Clear data block bitmap of target directory
+	for(int i = 0; i < DIRECT_PTR_NUM; i++){
+		if(target_dir_inode.direct_ptr[i] != INVALID_PTR){
+			unset_bitmap(DBLOCK_BITMAP, target_dir_inode.direct_ptr[i]);
+		}
+	}
+	write_dblock_bitmap();
 
 	// Step 4: Clear inode bitmap and its data block
+	unset_bitmap(INODE_BITMAP, target_dir_inode.ino);
+	write_inode_bitmap();
 
 	// Step 5: Call get_node_by_path() to get inode of parent directory
+	struct inode parent_inode;
+  	get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_inode);
 
 	// Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
+	dir_remove(parent_inode, base_name, strlen(base_name));
 
 	return 0;
 }
