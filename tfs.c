@@ -767,32 +767,115 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+	// TODO: add functionality for when offset is not 0
+	// int starting_block_idx  = offset / BLOCK_SIZE;
+	offset = 0;
 
 	// Step 1: You could call get_node_by_path() to get inode from path
-  struct inode file_inode;
-  int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
-  if(status != FOUND_INODE)
-    return 0;
+	struct inode file_inode;
+	int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
+	if(status != FOUND_INODE)
+		return 0;
 
 	// Step 2: Based on size and offset, read its data blocks from disk
+	int size_in_blocks = ceil(size / BLOCK_SIZE);
+	int bytes_read = 0;
+	printf("\noffset: %d, size in blocks : %d\n\n", offset, size_in_blocks);
+	buffer = (char*)malloc(size);
+	for(int i = 0; i < size_in_blocks; i++){
+		// If the file does not have an existing datablock where we need to write to, we can't read anything
+		if(file_inode.direct_ptr[i] == INVALID_PTR){
+			printf("\nNO DATABLOCK, iteration %d\n", i);
+			return 0;
 
-	// Step 3: copy the correct amount of data from offset to buffer
+		// The file has a datablock where we need to read, so copy it to the correct spot in the buffer
+		}else{
+			printf("\nHAS DATABLOCK, iteration %d\n", i);
+			void* buf = malloc(BLOCK_SIZE);
+			bio_read(SUPERBLOCK->d_start_blk + file_inode.direct_ptr[i], buf);
+			if(size >= BLOCK_SIZE){
+				memcpy((buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, BLOCK_SIZE);
+				size -= BLOCK_SIZE;
+				bytes_read += BLOCK_SIZE;
+			}else{
+				memcpy((buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, size);
+				bytes_read += size;
+				size = 0;
+			}
+			free(buf);
+		}		
+	}
+	printf("\n buffer: %s", buffer);
 
-	// Note: this function should return the amount of bytes you copied to buffer
-	return 0;
+	// Note: this function should return the amount of bytes you read from disk
+	return bytes_read;
 }
 
 static int tfs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+	// TODO: add functionality for when offset is not 0
+	// int starting_block_idx  = offset / BLOCK_SIZE;
+	offset = 0;
+
 	// Step 1: You could call get_node_by_path() to get inode from path
+	struct inode file_inode;
+	int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
+	if(status != FOUND_INODE)
+		return 0;
 
 	// Step 2: Based on size and offset, read its data blocks from disk
+	int size_in_blocks = (size / BLOCK_SIZE)+1;
+	int bytes_written = 0;
+	printf("\n buffer: %s\noffset: %d, size in blocks : %d\n\n", buffer, offset, size_in_blocks);
+	for(int i = 0; i < size_in_blocks; i++){
+
+		// If the file does not have an existing datablock where we need to write to, we need to create one
+		if(file_inode.direct_ptr[i] == INVALID_PTR){
+			printf("\nNO DATABLOCK, iteration %d\n", i);
+			int new_block_num = get_avail_blkno();
+			file_inode.direct_ptr[i] = new_block_num;
+			
+			void* buf = malloc(BLOCK_SIZE);
+			if(size >= BLOCK_SIZE){
+				memcpy(buf, (buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), BLOCK_SIZE);
+				size -= BLOCK_SIZE;
+				bytes_written += BLOCK_SIZE;
+			}else{
+				memcpy(buf, (buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), size);
+				bytes_written += size;
+				size = 0;
+			}
+			bio_write(SUPERBLOCK->d_start_blk + new_block_num, buf);
+			printf("\nWROTE TO BLOCK %d\n", SUPERBLOCK->d_start_blk + new_block_num);
+			free(buf);
+
+		// The file has a datablock where we need to write, so read it and memcpy at the appropriote offset
+		}else{
+			printf("\nHAS DATABLOCK\n");
+			void* buf = malloc(BLOCK_SIZE);
+			bio_read(SUPERBLOCK->d_start_blk + file_inode.direct_ptr[i], buf);
+			if(size >= BLOCK_SIZE){
+				memcpy(buf, (buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), BLOCK_SIZE);
+				size -= BLOCK_SIZE;
+				bytes_written += BLOCK_SIZE;
+			}else{
+				memcpy(buf, (buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), size);
+				bytes_written += size;
+				size = 0;
+			}
+			bio_write(SUPERBLOCK->d_start_blk + file_inode.direct_ptr[i], buf);
+			free(buf);
+		}		
+	}
 
 	// Step 3: Write the correct amount of data from offset to disk
 
 	// Step 4: Update the inode info and write it to disk
+	file_inode.size += bytes_written;
+	writei(file_inode.ino, &file_inode);
 
 	// Note: this function should return the amount of bytes you write to disk
-	return size;
+
+	return bytes_written;
 }
 
 static int tfs_unlink(const char *path) {
