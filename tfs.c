@@ -474,13 +474,11 @@ int tfs_mkfs() {
 	INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
 	DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
 	INODES_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct inode));
-  DIRENTS_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct dirent));
+ 	DIRENTS_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct dirent));
 	INODE_TABLE_SIZE_IN_BLOCKS = ceil(MAX_INUM / INODES_PER_BLOCK);
 	BLOCK_SIZE_IN_CHARACTERS = ceil(BLOCK_SIZE / 8);
 
 	// Call dev_init() to initialize (Create) Diskfile
-	dev_init(diskfile_path);
-  	diskfile_found = 1;
 
  	// write superblock information
 	SUPERBLOCK = (struct superblock*)malloc(sizeof(struct superblock));
@@ -488,64 +486,80 @@ int tfs_mkfs() {
 		perror("ERROR:: Unable to allocate the superblock!");
 		exit(-1);
 	}
-	SUPERBLOCK->magic_num = MAGIC_NUM;
-	SUPERBLOCK->max_inum = MAX_INUM;
-	SUPERBLOCK->max_dnum = MAX_DNUM;
-	SUPERBLOCK->i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
-	SUPERBLOCK->d_bitmap_blk = SUPERBLOCK->i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
-	SUPERBLOCK->i_start_blk = SUPERBLOCK->d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
-	SUPERBLOCK->d_start_blk = SUPERBLOCK->i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
-	bio_write(0, (void*)SUPERBLOCK);
-
-	// initialize inode bitmap
+	void* buf = malloc(BLOCK_SIZE);
+	bio_read(0, buf);
+	memcpy(SUPERBLOCK, buf, sizeof(struct superblock));
 	INODE_BITMAP = (bitmap_t)malloc(MAX_INUM / 8);
-  	write_inode_bitmap();
-
-	// initialize data block bitmap
 	DBLOCK_BITMAP = (bitmap_t)malloc(MAX_DNUM / 8);
-	write_dblock_bitmap();
 
-	// allocate all the inodes and write them in the disk   
-	for(int i = 1; i < MAX_INUM; i++) {
-		struct inode* inode = malloc(sizeof(struct inode));
-		memset(inode, 0, sizeof(struct inode));
-		inode->valid = INVALID;
+	if(SUPERBLOCK->magic_num != MAGIC_NUM){
+		dev_init(diskfile_path);
+  		diskfile_found = 1;
+		SUPERBLOCK->magic_num = MAGIC_NUM;
+		SUPERBLOCK->max_inum = MAX_INUM;
+		SUPERBLOCK->max_dnum = MAX_DNUM;
+		SUPERBLOCK->i_bitmap_blk = SUPERBLOCK_SIZE_IN_BLOCKS;
+		SUPERBLOCK->d_bitmap_blk = SUPERBLOCK->i_bitmap_blk + INODE_BITMAP_SIZE_IN_BLOCKS;
+		SUPERBLOCK->i_start_blk = SUPERBLOCK->d_bitmap_blk + DBLOCK_BITMAP_SIZE_IN_BLOCKS;
+		SUPERBLOCK->d_start_blk = SUPERBLOCK->i_start_blk + INODE_TABLE_SIZE_IN_BLOCKS;
+		bio_write(0, (void*)SUPERBLOCK);
 
-		// Set all direct links to invalid
-		for (int k = 0; k < 16; k++)
-			inode->direct_ptr[k] = INVALID;
+		// initialize inode bitmap
+		write_inode_bitmap();
 
-		// Set all indirect links to invalid
-		for (int k = 0; k < 8; k++)
-			inode->indirect_ptr[k] = INVALID;
+		// initialize data block bitmap
+		write_dblock_bitmap();
 
-		inode->ino = i;
+		// allocate all the inodes and write them in the disk   
+		for(int i = 1; i < MAX_INUM; i++) {
+			struct inode* inode = malloc(sizeof(struct inode));
+			memset(inode, 0, sizeof(struct inode));
+			inode->valid = INVALID;
 
-		// Write inode block to disk
-		writei(i, inode);
-		free(inode);
+			// Set all direct links to invalid
+			for (int k = 0; k < 16; k++)
+				inode->direct_ptr[k] = INVALID;
+
+			// Set all indirect links to invalid
+			for (int k = 0; k < 8; k++)
+				inode->indirect_ptr[k] = INVALID;
+
+			inode->ino = i;
+
+			// Write inode block to disk
+			writei(i, inode);
+			free(inode);
+		}
+
+		// update bitmap information for root directory
+		set_bitmap(INODE_BITMAP, 0);
+		write_inode_bitmap();
+
+		// update inode for root directory
+		struct inode* root_inode = create_inode("/", 0, FOLDER, VALID, 2); // this has 2 links because "." points to this inode as well
+
+		// root directory's first direct ptr should point to a block of dirents	
+		int root_dirent_block_no = get_avail_blkno(); 
+		set_bitmap(DBLOCK_BITMAP, root_dirent_block_no);
+		write_dblock_bitmap();
+
+		root_inode->direct_ptr[0] = root_dirent_block_no;
+		format_block_as_dirents(root_dirent_block_no);
+		writei(0, root_inode);
+		
+		// Add "." to root inode
+		dir_add(*root_inode, root_inode, ".", 2);
+
+		free(root_inode);
+	}else{
+		dev_open(diskfile_path);
+		bio_read(SUPERBLOCK->i_bitmap_blk, buf);
+		memcpy(INODE_BITMAP, buf, MAX_INUM / 8);
+		bio_read(SUPERBLOCK->d_bitmap_blk, buf);
+		memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
 	}
-
-	// update bitmap information for root directory
-	set_bitmap(INODE_BITMAP, 0);
-	write_inode_bitmap();
-
-	// update inode for root directory
-	struct inode* root_inode = create_inode("/", 0, FOLDER, VALID, 2); // this has 2 links because "." points to this inode as well
-
-  // root directory's first direct ptr should point to a block of dirents	
-  int root_dirent_block_no = get_avail_blkno(); 
-  set_bitmap(DBLOCK_BITMAP, root_dirent_block_no);
-  write_dblock_bitmap();
-
-	root_inode->direct_ptr[0] = root_dirent_block_no;
-	format_block_as_dirents(root_dirent_block_no);
-	writei(0, root_inode);
 	
-	// Add "." to root inode
-	dir_add(*root_inode, root_inode, ".", 2);
-
-  free(root_inode);
+	free(buf);
 	return 0;
 }
 
