@@ -780,8 +780,8 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 	// Step 2: Based on size and offset, read its data blocks from disk
 	int size_in_blocks = ceil(size / BLOCK_SIZE);
 	int bytes_read = 0;
-	printf("\noffset: %d, size in blocks : %d\n\n", offset, size_in_blocks);
-	buffer = (char*)malloc(size);
+	printf("\noffset: %d, size in blocks : %d, size: %d\n\n", offset, size_in_blocks, size);
+	char* temp_buffer = (char*)malloc(size + 1);
 	for(int i = 0; i < size_in_blocks; i++){
 		// If the file does not have an existing datablock where we need to write to, we can't read anything
 		if(file_inode.direct_ptr[i] == INVALID_PTR){
@@ -794,18 +794,20 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 			void* buf = malloc(BLOCK_SIZE);
 			bio_read(SUPERBLOCK->d_start_blk + file_inode.direct_ptr[i], buf);
 			if(size >= BLOCK_SIZE){
-				memcpy((buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, BLOCK_SIZE);
+				printf("\nThis probably should not be happening\n");
+				memcpy((temp_buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, BLOCK_SIZE);
 				size -= BLOCK_SIZE;
 				bytes_read += BLOCK_SIZE;
 			}else{
-				memcpy((buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, size);
+				memcpy((temp_buffer + (i*BLOCK_SIZE_IN_CHARACTERS)), buf, size);
 				bytes_read += size;
 				size = 0;
 			}
 			free(buf);
 		}		
 	}
-	printf("\n buffer: %s", buffer);
+	memcpy(buffer, temp_buffer, bytes_read);
+	printf("\n buffer: %s, bytes read: %d\n", buffer, bytes_read);
 
 	// Note: this function should return the amount of bytes you read from disk
 	return bytes_read;
@@ -825,12 +827,12 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 	// Step 2: Based on size and offset, read its data blocks from disk
 	int size_in_blocks = (size / BLOCK_SIZE)+1;
 	int bytes_written = 0;
-	printf("\n buffer: %s\noffset: %d, size in blocks : %d\n\n", buffer, offset, size_in_blocks);
+	printf("\n WRITING buffer: %s\noffset: %d, size in blocks : %d\n\n", buffer, offset, size_in_blocks);
 	for(int i = 0; i < size_in_blocks; i++){
 
 		// If the file does not have an existing datablock where we need to write to, we need to create one
 		if(file_inode.direct_ptr[i] == INVALID_PTR){
-			printf("\nNO DATABLOCK, iteration %d\n", i);
+			printf("\nWRITING: NO DATABLOCK, iteration %d\n", i);
 			int new_block_num = get_avail_blkno();
 			file_inode.direct_ptr[i] = new_block_num;
 			
