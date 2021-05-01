@@ -52,8 +52,14 @@ else
   fi
 fi
 
+
 printf "${YELLOW}Attempting to mount TFS at ${MOUNTDIR}...${NC}\n"
-./tfs -s $MOUNTDIR -d
+# If no argument passed in, then dont run the test
+  if [ -z "$1" ]; then
+    ./tfs -s $MOUNTDIR -d
+  else
+    ./tfs -s $MOUNTDIR
+  fi
 if [ $? -eq 0 ]; then
   printf "${GREEN}Successfully mounted TFS at ${MOUNTDIR}!${NC}\n"
 else
@@ -61,16 +67,20 @@ else
   exit 1
 fi
 
-# printf "${YELLOW} Attempting to build benchmark...${NC}\n"
-# cd benchmark;
-# make clean;
-# make;
-# if [ $? -eq 0 ]; then
-  # printf "${GREEN}Benchmark built succesffully${NC}\n"
-# else
-  # printf "${RED}Failed to build benchmark${NC}\n";
-  # exit 1
-# fi
-#
-# printf "${YELLOW}Running simple_test.c${NC}\n";
-# ./simple_test $MOUNTDIR
+
+# Just like above, we only run this test if an argument was passed in
+if [ ! -z "$1" ]; then
+printf "${YELLOW} Attempting to build benchmark...${NC}\n"
+cd benchmark;
+make clean;
+make;
+if [ $? -eq 0 ]; then
+  printf "${GREEN}Benchmark built succesffully${NC}\n"
+else
+  printf "${RED}Failed to build benchmark${NC}\n";
+  exit 1
+fi
+
+printf "${YELLOW}Running simple_test.c${NC}\n";
+./simple_test $MOUNTDIR
+fi

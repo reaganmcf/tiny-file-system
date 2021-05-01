@@ -596,6 +596,7 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
   } else {
     stbuf->st_mode = S_IFREG | 0644;
     stbuf->st_nlink = 1; // ?
+  	stbuf->st_size = inode.size;
   }
 
 	// Step 2: fill attribute of file into stbuf from inode
@@ -775,7 +776,7 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 	struct inode file_inode;
 	int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
 	if(status != FOUND_INODE)
-		return 0;
+		return -ENOENT;
 
 	// Step 2: Based on size and offset, read its data blocks from disk
 	int size_in_blocks = ceil(size / BLOCK_SIZE);
@@ -806,11 +807,11 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 			free(buf);
 		}		
 	}
-	memcpy(buffer, temp_buffer, bytes_read);
+	strncpy(buffer, temp_buffer, bytes_read);
 	printf("\n buffer: %s, bytes read: %d\n", buffer, bytes_read);
 
 	// Note: this function should return the amount of bytes you read from disk
-	return bytes_read;
+	return strlen(buffer);
 }
 
 static int tfs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
