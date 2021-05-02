@@ -231,6 +231,10 @@ int writei(uint16_t ino, struct inode *inode) {
 		perror("ERROR:: Could not read inode from inode table");
 		exit(-1);
 	}
+
+  // update stat for inode (st_ctime is the timestamp of the last change to the inode)
+  time(&(inode->vstat.st_ctime));
+
 	struct inode* block_of_inodes = (struct inode*)buf;
 	printf("WRITEI:: ino = %d, block num = %d, offset = %d\n",
 			ino,
@@ -654,9 +658,13 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 
   stbuf->st_uid = getuid();
   stbuf->st_gid = getgid();
-	time(&stbuf->st_mtime);
 
-	return FOUND_INODE;
+  stbuf->st_atime = inode.vstat.st_atime;
+  stbuf->st_mtime = inode.vstat.st_mtime;
+  stbuf->st_ctime = inode.vstat.st_ctime;
+
+  
+  return FOUND_INODE;
 }
 
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
@@ -693,7 +701,7 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
         if(dirent_block[j].valid == VALID) {
           filler(buffer, dirent_block[j].name, NULL, 0);
         }
-      }
+      };
 
       free(dirent_block);
     }
@@ -884,6 +892,10 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 	strncpy(buffer, temp_buffer, bytes_read);
 	printf("\n buffer: %s, bytes read: %d\n", buffer, bytes_read);
 
+  // update stat for the inode
+  time(&(file_inode.vstat.st_atime));
+  writei(file_inode.ino, &file_inode);
+
 	// Note: this function should return the amount of bytes you read from disk
 	return strlen(buffer);
 }
@@ -945,13 +957,14 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 	}
 
 	// Step 3: Write the correct amount of data from offset to disk
+  
 
 	// Step 4: Update the inode info and write it to disk
+  time(&(file_inode.vstat.st_mtime));
 	file_inode.size += bytes_written;
 	writei(file_inode.ino, &file_inode);
 
 	// Note: this function should return the amount of bytes you write to disk
-
 	return bytes_written;
 }
 
@@ -1046,14 +1059,9 @@ struct inode* create_inode(char* path, uint16_t ino, uint32_t type, uint8_t is_v
 	for(int i = 0; i < 8; i++){
 		new_inode->indirect_ptr[i] = INVALID_PTR;
 	}
-	//new_inode->vstat = NULL;
-	// struct stat* buff;
-	// int stat_result = stat(path, buff);
-	// if (buff == NULL) {
-	// 	perror("ERROR:: Unable to build a stat structure.");
-	// 	exit(-1);
-	// }
-	// new_inode.vstat = *buff;
-	return new_inode;
+  time(&(new_inode->vstat.st_atime));
+  time(&(new_inode->vstat.st_mtime));
+  time(&(new_inode->vstat.st_ctime));
 	
+  return new_inode;
 }
