@@ -45,6 +45,7 @@ int DIRENTS_PER_BLOCK;
  * Write the inode bitmap
  */
 void write_inode_bitmap() {
+  printf("wrriting inode bitmap at block %d\n", SUPERBLOCK->i_bitmap_blk);
   bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP) ;
 }
 
@@ -470,7 +471,7 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  */
 int tfs_mkfs() {
 
-	SUPERBLOCK_SIZE_IN_BLOCKS = ceil(sizeof(struct superblock) / BLOCK_SIZE);
+	SUPERBLOCK_SIZE_IN_BLOCKS = ceil((double)sizeof(struct superblock) / BLOCK_SIZE);
 	INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
 	DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
 	INODES_PER_BLOCK = floor((double)BLOCK_SIZE / sizeof(struct inode));
@@ -481,20 +482,21 @@ int tfs_mkfs() {
 	// Call dev_init() to initialize (Create) Diskfile
 
  	// write superblock information
-	SUPERBLOCK = (struct superblock*)malloc(sizeof(struct superblock));
+	SUPERBLOCK = malloc(sizeof(struct superblock));
+	memset(SUPERBLOCK, 0, sizeof(struct superblock));
 	if(SUPERBLOCK == NULL) {
 		perror("ERROR:: Unable to allocate the superblock!");
 		exit(-1);
 	}
-	void* buf = malloc(BLOCK_SIZE);
-	bio_read(0, buf);
-	memcpy(SUPERBLOCK, buf, sizeof(struct superblock));
+
 	INODE_BITMAP = (bitmap_t)malloc(MAX_INUM / 8);
 	DBLOCK_BITMAP = (bitmap_t)malloc(MAX_DNUM / 8);
 
-	if(SUPERBLOCK->magic_num != MAGIC_NUM){
+
+	if(dev_open(diskfile_path) < 0) {
+		
+		printf("Unable to find diskfile path!\n");
 		dev_init(diskfile_path);
-  		diskfile_found = 1;
 		SUPERBLOCK->magic_num = MAGIC_NUM;
 		SUPERBLOCK->max_inum = MAX_INUM;
 		SUPERBLOCK->max_dnum = MAX_DNUM;
@@ -552,14 +554,31 @@ int tfs_mkfs() {
 
 		free(root_inode);
 	}else{
-		dev_open(diskfile_path);
+
+    // Create a buffer we will be reading from
+		void* buf = calloc(1, BLOCK_SIZE);
+		
+    // Load superblock into memory
+    bio_read(0, buf);
+		memcpy(SUPERBLOCK, buf, sizeof(struct superblock));
+
+    // Load inode bitmap into memory
+		memset(buf, 0, BLOCK_SIZE);
 		bio_read(SUPERBLOCK->i_bitmap_blk, buf);
 		memcpy(INODE_BITMAP, buf, MAX_INUM / 8);
+		
+
+    // Load datablock bitmap into memory
+    memset(buf, 0, BLOCK_SIZE);
 		bio_read(SUPERBLOCK->d_bitmap_blk, buf);
 		memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
+
+		free(buf);
 	}
+
+
+  diskfile_found = 1;
 	
-	free(buf);
 	return 0;
 }
 
