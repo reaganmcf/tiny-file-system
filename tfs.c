@@ -45,7 +45,6 @@ int DIRENTS_PER_BLOCK;
  * Write the inode bitmap
  */
 void write_inode_bitmap() {
-  printf("wrriting inode bitmap at block %d\n", SUPERBLOCK->i_bitmap_blk);
   bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP) ;
 }
 
