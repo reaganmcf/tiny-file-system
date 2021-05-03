@@ -781,8 +781,13 @@ static int tfs_rmdir(const char *path) {
 	write_dblock_bitmap();
 
 	// Step 4: Clear inode bitmap and its data block
-	unset_bitmap(INODE_BITMAP, target_dir_inode.ino);
-	write_inode_bitmap();
+	target_dir_inode.link--;
+	if(target_dir_inode.link <= 0){
+		unset_bitmap(INODE_BITMAP, target_dir_inode.ino);
+		write_inode_bitmap();
+		target_dir_inode.valid = INVALID;
+	}
+	writei(target_dir_inode.ino, &target_dir_inode);
 
 	// Step 5: Call get_node_by_path() to get inode of parent directory
 	struct inode parent_inode;
@@ -971,16 +976,39 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 static int tfs_unlink(const char *path) {
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
+	char *path_copy = calloc(1, strlen(path) + 1);
+	strcpy(path_copy, path);
+	char* directory_name = dirname(path_copy);
+	char* base_name = basename(path);
 
 	// Step 2: Call get_node_by_path() to get inode of target file
+	struct inode target_inode;
+  	get_node_by_path(path, ROOT_INODE_NUMBER, &target_inode);
 
 	// Step 3: Clear data block bitmap of target file
+	for(int i = 0; i < DIRECT_PTR_NUM; i++){
+		if(target_inode.direct_ptr[i] != INVALID_PTR){
+			unset_bitmap(DBLOCK_BITMAP, target_inode.direct_ptr[i]);
+		}
+	}
+	write_dblock_bitmap();
 
 	// Step 4: Clear inode bitmap and its data block
+	target_inode.link--;
+	if(target_inode.link <= 0){
+		unset_bitmap(INODE_BITMAP, target_inode.ino);
+		write_inode_bitmap();
+		target_inode.valid = INVALID;
+	}
+	writei(target_inode.ino, &target_inode);
+	
 
 	// Step 5: Call get_node_by_path() to get inode of parent directory
+	struct inode parent_inode;
+  	get_node_by_path(directory_name, ROOT_INODE_NUMBER, &parent_inode);
 
 	// Step 6: Call dir_remove() to remove directory entry of target file in its parent directory
+	dir_remove(parent_inode, base_name, strlen(base_name));
 
 	return 0;
 }
