@@ -70,17 +70,20 @@ fi
 
 # Just like above, we only run this test if an argument was passed in
 if [ ! -z "$1" ]; then
-printf "${YELLOW} Attempting to build benchmark...${NC}\n"
+printf "${YELLOW} Attempting to build benchmarks...${NC}\n"
 cd benchmark;
 make clean;
 make;
 if [ $? -eq 0 ]; then
-  printf "${GREEN}Benchmark built succesffully${NC}\n"
+  printf "${GREEN}Benchmarks built succesffully${NC}\n"
 else
-  printf "${RED}Failed to build benchmark${NC}\n";
+  printf "${RED}Failed to build benchmarks${NC}\n";
   exit 1
 fi
 
 printf "${YELLOW}Running simple_test.c${NC}\n";
 ./simple_test $MOUNTDIR
+
+printf "${YELLOW}Running test_cases.c${NC}\n";
+./test_case $MOUNDIR
 fi

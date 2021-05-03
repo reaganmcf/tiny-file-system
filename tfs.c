@@ -41,6 +41,8 @@ int BLOCK_SIZE_IN_CHARACTERS;
 int INODES_PER_BLOCK;
 int DIRENTS_PER_BLOCK;
 
+pthread_mutex_t file_system_lock;
+
 /**
  * Write the inode bitmap
  */
@@ -474,6 +476,9 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
  */
 int tfs_mkfs() {
 
+	// Lock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
 	SUPERBLOCK_SIZE_IN_BLOCKS = ceil((double)sizeof(struct superblock) / BLOCK_SIZE);
 	INODE_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_INUM / 8) / BLOCK_SIZE);
 	DBLOCK_BITMAP_SIZE_IN_BLOCKS = ceil((double)(MAX_DNUM / 8) / BLOCK_SIZE);
@@ -581,6 +586,9 @@ int tfs_mkfs() {
 
 
   diskfile_found = 1;
+
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
 	
 	return 0;
 }
@@ -594,6 +602,9 @@ static void *tfs_init(struct fuse_conn_info *conn) {
 	if (diskfile_found == 0) {
 		tfs_mkfs();
 	}
+
+	// init lock
+	pthread_mutex_init(&file_system_lock);
 
 	// Step 1b: If disk file is found, just initialize in-memory data structures
 	// and read superblock from disk
@@ -627,6 +638,7 @@ static void tfs_destroy(void *userdata) {
   free(SUPERBLOCK);
   free(INODE_BITMAP);
   free(DBLOCK_BITMAP);
+  pthread_mutex_destroy(&file_system_lock);
 
 	// Step 2: Close diskfile
   dev_close();
@@ -634,12 +646,15 @@ static void tfs_destroy(void *userdata) {
 }
 
 static int tfs_getattr(const char *path, struct stat *stbuf) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: call get_node_by_path() to get inode from path
   struct inode inode;
   int status = get_node_by_path(path, ROOT_INODE_NUMBER, &inode);
   if (status == NO_INODE_FOUND) {
     printf("GETATTR:: Couldn't find inode for the path!\n");
+		pthread_mutex_unlock(&file_system_lock);
     return -ENOENT;
   }
 
@@ -663,16 +678,21 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
   stbuf->st_mtime = inode.vstat.st_mtime;
   stbuf->st_ctime = inode.vstat.st_ctime;
 
-  
+  // Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
   return FOUND_INODE;
 }
 
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Call get_node_by_path() to get inode from path
   struct inode dir_inode;
   int status = get_node_by_path(path, ROOT_INODE_NUMBER, &dir_inode);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
 	// Step 2: If not find, return -1
   if(status == FOUND_INODE)
     return 0;
@@ -681,6 +701,8 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+	// Lock the ifle system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Call get_node_by_path() to get inode from path
   struct inode dir_inode;
@@ -707,11 +729,17 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
     }
   }
 
+	// Unlock the file system
+	pthread_mutex_unlock(file_system_lock);
+
 	return 0;
 }
 
 
 static int tfs_mkdir(const char *path, mode_t mode) {
+
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
   // Note: this won't work without a strcpy because it fucks with the path ptr
@@ -751,10 +779,15 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 
   free(new_dir_inode);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
   return 0;
 }
 
 static int tfs_rmdir(const char *path) {
+	// Lock the file system 
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target directory name
 	char *path_copy = calloc(1, strlen(path) + 1);
@@ -768,7 +801,8 @@ static int tfs_rmdir(const char *path) {
 
 	// Step 2: Call get_node_by_path() to get inode of target directory
 	struct inode target_dir_inode;
-  	if(get_node_by_path(path, ROOT_INODE_NUMBER, &target_dir_inode) == NO_INODE_FOUND){
+  if(get_node_by_path(path, ROOT_INODE_NUMBER, &target_dir_inode) == NO_INODE_FOUND){
+		pthread_mutex_unlock(&file_system_lock);
 		return -1;
 	}
 
@@ -796,6 +830,7 @@ static int tfs_rmdir(const char *path) {
 	// Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
 	dir_remove(parent_inode, base_name, strlen(base_name));
 
+	pthread_mutex_unlock(&file_system_lock);
 	return 0;
 }
 
@@ -806,6 +841,8 @@ static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
 }
 
 static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
@@ -838,14 +875,22 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
   writei(file_ino, new_file_inode);
   free(new_file_inode);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
   return 0;
 }
 
 static int tfs_open(const char *path, struct fuse_file_info *fi) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Call get_node_by_path() to get inode from path
   struct inode dir_inode;
   int status = get_node_by_path(path, ROOT_INODE_NUMBER, &dir_inode);
+
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
 
 	// Step 2: If not find, return -1
   if(status == FOUND_INODE)
@@ -855,11 +900,16 @@ static int tfs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
+
 	// Step 1: You could call get_node_by_path() to get inode from path
 	struct inode file_inode;
 	int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
-	if(status != FOUND_INODE)
+	if(status != FOUND_INODE) {
+		pthread_mutex_unlock(&file_system_lock);
 		return -ENOENT;
+	}
 
 	// Step 2: Based on size and offset, read its data blocks from disk
 	int size_in_blocks = ceil(size / BLOCK_SIZE);
@@ -870,6 +920,7 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 		// If the file does not have an existing datablock where we need to write to, we can't read anything
 		if(file_inode.direct_ptr[i] == INVALID_PTR){
 			printf("\nNO DATABLOCK, iteration %d\n", i);
+			pthread_mutex_unlock(&file_system_lock);
 			return 0;
 
 		// The file has a datablock where we need to read, so copy it to the correct spot in the buffer
@@ -899,16 +950,24 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 	time(&(file_inode.vstat.st_atime));
 	writei(file_inode.ino, &file_inode);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
 	// Note: this function should return the amount of bytes you read from disk
 	return bytes_read;
 }
 
 static int tfs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
+	// Lock the file system
+	pthread_mutex_lock(&file_system_lock);
+
 	// Step 1: You could call get_node_by_path() to get inode from path
 	struct inode file_inode;
 	int status = get_node_by_path(path, ROOT_INODE_NUMBER, &file_inode);
-	if(status != FOUND_INODE)
+	if(status != FOUND_INODE) {
+		pthread_mutex_unlock(&file_system_lock);
 		return 0;
+	}
 
 	// Step 2: Based on size and offset, read its data blocks from disk
 	int size_in_blocks = (size / BLOCK_SIZE)+1;
@@ -973,11 +1032,17 @@ static int tfs_write(const char *path, const char *buffer, size_t size, off_t of
 
 	writei(file_inode.ino, &file_inode);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
 	// Note: this function should return the amount of bytes you write to disk
 	return bytes_written;
 }
 
 static int tfs_unlink(const char *path) {
+
+	// Lock the file systme
+	pthread_mutex_lock(&file_system_lock);
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
 	char *path_copy = calloc(1, strlen(path) + 1);
@@ -1013,6 +1078,9 @@ static int tfs_unlink(const char *path) {
 
 	// Step 6: Call dir_remove() to remove directory entry of target file in its parent directory
 	dir_remove(parent_inode, base_name, strlen(base_name));
+
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
 
 	return 0;
 }
