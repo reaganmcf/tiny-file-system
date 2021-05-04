@@ -70,6 +70,11 @@ struct dirent {
 
 
 void write_inode_bitmap();
+void write_dblock_bitmap();
+void read_inode_bitmap();
+void read_dblock_bitmap();
+int write_dirent(int block_no, int offset, struct dirent* directory_entry);
+void format_block_as_dirents(int block_no);
 struct inode* create_inode(char* path, uint16_t ino, uint32_t type, uint8_t is_valid, int link);
 
 /*

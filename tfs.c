@@ -47,14 +47,36 @@ pthread_mutex_t file_system_lock;
  * Write the inode bitmap
  */
 void write_inode_bitmap() {
-  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP) ;
+		for(int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++){
+				bio_write(SUPERBLOCK->i_bitmap_blk + i, (void*)INODE_BITMAP[i * BLOCK_SIZE]) ;
+		} 
+}
+
+void read_inode_bitmap(){
+	void* buf = (void*)malloc(BLOCK_SIZE);
+	for(int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++){
+		bio_read(SUPERBLOCK->i_bitmap_blk + i, buf);
+		memcpy(INODE_BITMAP + (BLOCK_SIZE * i), buf, BLOCK_SIZE);
+	}
+	free(buf);
 }
 
 /**
  * Write the dblock bitmap
  */
 void write_dblock_bitmap() {
-  bio_write(SUPERBLOCK->d_bitmap_blk, (void*)DBLOCK_BITMAP);
+  for(int i = 0; i < DBLOCK_BITMAP_SIZE_IN_BLOCKS; i++){
+				bio_write(SUPERBLOCK->d_bitmap_blk + i, (void*)DBLOCK_BITMAP[i * BLOCK_SIZE]) ;
+	} 
+}
+
+void read_dblock_bitmap(){
+	void* buf = (void*)malloc(BLOCK_SIZE);
+	for(int i = 0; i < DBLOCK_BITMAP_SIZE_IN_BLOCKS; i++){
+		bio_read(SUPERBLOCK->d_bitmap_blk + i, buf);
+		memcpy(DBLOCK_BITMAP + (BLOCK_SIZE * i), buf, BLOCK_SIZE);
+	}
+	free(buf);
 }
 
 /* 
@@ -67,11 +89,14 @@ int get_avail_ino() {
     perror("ERROR:: Superblock is NULL.");
     exit(-1);
   }
+	printf("\n\ntest\n\n");
 
-  void* buf = malloc(BLOCK_SIZE);
-  bio_read(SUPERBLOCK->i_bitmap_blk, buf);
-  memcpy(INODE_BITMAP, buf, MAX_INUM / 8);
-
+	read_inode_bitmap();
+  // void* buf = malloc(BLOCK_SIZE);
+	// for(int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++){
+	// 	bio_read(SUPERBLOCK->i_bitmap_blk, buf);
+	// 	memcpy(INODE_BITMAP + (i * BLOCK_SIZE), buf, MAX_INUM / 8);
+	// }
   if (INODE_BITMAP == NULL) {
     perror("ERROR:: Could not read inode bitmap from disk.");
     exit(-1);
@@ -93,11 +118,12 @@ int get_avail_ino() {
 
   // Step 3: Update inode bitmap and write to disk
   set_bitmap(INODE_BITMAP, idx);
-  bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
-  for (int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++) {
-    bio_write(SUPERBLOCK->i_bitmap_blk + i,
-              INODE_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
-  }
+	write_inode_bitmap();
+  // bio_write(SUPERBLOCK->i_bitmap_blk, (void*)INODE_BITMAP);
+  // for (int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++) {
+  //   bio_write(SUPERBLOCK->i_bitmap_blk + i,
+  //             INODE_BITMAP[(int)(i * BLOCK_SIZE_IN_CHARACTERS)]);
+  // }
   //free(buf);
 
   return idx;
@@ -114,9 +140,10 @@ int get_avail_blkno() {
     exit(-1);
   }
 
-  void* buf = malloc(BLOCK_SIZE);
-  bio_read(SUPERBLOCK->d_bitmap_blk, buf);
-  memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
+  // void* buf = malloc(BLOCK_SIZE);
+  // bio_read(SUPERBLOCK->d_bitmap_blk, buf);
+  // memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
+	read_dblock_bitmap();
 
   if (DBLOCK_BITMAP == NULL) {
     perror("ERROR:: Could not read dnode bitmap from disk.");
@@ -142,7 +169,7 @@ int get_avail_blkno() {
   // Step 3: Update data block bitmap and write to disk
   set_bitmap(DBLOCK_BITMAP, idx);
   write_dblock_bitmap();
-  free(buf);
+  //free(buf);
 
   return idx;
 }
@@ -571,15 +598,17 @@ int tfs_mkfs() {
 		memcpy(SUPERBLOCK, buf, sizeof(struct superblock));
 
     // Load inode bitmap into memory
-		memset(buf, 0, BLOCK_SIZE);
-		bio_read(SUPERBLOCK->i_bitmap_blk, buf);
-		memcpy(INODE_BITMAP, buf, MAX_INUM / 8);
+		// memset(buf, 0, BLOCK_SIZE);
+		// bio_read(SUPERBLOCK->i_bitmap_blk, buf);
+		// memcpy(INODE_BITMAP, buf, MAX_INUM / 8);
+		read_inode_bitmap();
 		
 
     // Load datablock bitmap into memory
-    memset(buf, 0, BLOCK_SIZE);
-		bio_read(SUPERBLOCK->d_bitmap_blk, buf);
-		memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
+    // memset(buf, 0, BLOCK_SIZE);
+		// bio_read(SUPERBLOCK->d_bitmap_blk, buf);
+		// memcpy(DBLOCK_BITMAP, buf, MAX_DNUM / 8);
+		read_dblock_bitmap();
 
 		free(buf);
 	}
@@ -677,7 +706,6 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
   stbuf->st_atime = inode.vstat.st_atime;
   stbuf->st_mtime = inode.vstat.st_mtime;
   stbuf->st_ctime = inode.vstat.st_ctime;
-
   // Unlock the file system
 	pthread_mutex_unlock(&file_system_lock);
   return FOUND_INODE;
@@ -729,9 +757,11 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
     }
   }
 
-	// Unlock the file system
-	pthread_mutex_unlock(file_system_lock);
 
+	// Unlock the file system
+	pthread_mutex_unlock(&file_system_lock);
+
+	printf("READDIR:: finished\n");
 	return 0;
 }
 

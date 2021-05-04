@@ -8,7 +8,7 @@
 #ifndef _BLOCK_H_
 #define _BLOCK_H_
 
-#define BLOCK_SIZE 4096
+#define BLOCK_SIZE 512
 
 void dev_init(const char* diskfile_path);
 int dev_open(const char* diskfile_path);
