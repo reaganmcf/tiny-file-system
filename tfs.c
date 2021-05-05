@@ -846,9 +846,7 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 
 	// Step 1: Use dirname() and basename() to separate parent directory path and target file name
 
-  // Note: this won't work without a strcpy because it 
-	
-	s with the path ptr
+  // Note: this won't work without a strcpy because it with the path ptr
   char *path_copy = calloc(1, strlen(path) + 1);
   strcpy(path_copy, path);
   char* directory_name = dirname(path_copy);
