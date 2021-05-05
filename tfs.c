@@ -47,9 +47,13 @@ pthread_mutex_t file_system_lock;
  * Write the inode bitmap
  */
 void write_inode_bitmap() {
-		for(int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++){
-				bio_write(SUPERBLOCK->i_bitmap_blk + i, (void*)INODE_BITMAP[i * BLOCK_SIZE]) ;
-		} 
+	void *buf = calloc(1, BLOCK_SIZE);
+	for(int i = 0; i < INODE_BITMAP_SIZE_IN_BLOCKS; i++){
+		memcpy(buf, INODE_BITMAP + (BLOCK_SIZE * i), BLOCK_SIZE);
+		bio_write(SUPERBLOCK->i_bitmap_blk + i, buf);
+		printf("wrote to block %d\n", SUPERBLOCK->i_bitmap_blk + i);
+	} 
+	free(buf);
 }
 
 void read_inode_bitmap(){
@@ -524,8 +528,8 @@ int tfs_mkfs() {
 		exit(-1);
 	}
 
-	INODE_BITMAP = (bitmap_t)malloc(MAX_INUM / 8);
-	DBLOCK_BITMAP = (bitmap_t)malloc(MAX_DNUM / 8);
+	INODE_BITMAP = (bitmap_t)calloc(1, MAX_INUM / 8);
+	DBLOCK_BITMAP = (bitmap_t)calloc(1, MAX_DNUM / 8);
 
 
 	if(dev_open(diskfile_path) < 0) {
@@ -618,6 +622,8 @@ int tfs_mkfs() {
 
 	// Unlock the file system
 	pthread_mutex_unlock(&file_system_lock);
+
+	printf("Inode bitmap size in blocks is %d\n", INODE_BITMAP_SIZE_IN_BLOCKS);
 	
 	return 0;
 }
@@ -790,6 +796,8 @@ static int tfs_mkdir(const char *path, mode_t mode) {
   int dir_ino = get_avail_ino();
   set_bitmap(INODE_BITMAP, dir_ino);
   write_inode_bitmap();
+
+	printf("dir_add:: next avail inode number is %d\n", dir_ino);
 
 	// Step 4: Call dir_add() to add directory entry of target file to parent directory
   dir_add(parent_dir_inode, dir_ino, base_name, strlen(base_name) + 1);
