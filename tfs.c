@@ -730,7 +730,7 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
   }
 
 	// Unlock the file system
-	pthread_mutex_unlock(file_system_lock);
+	pthread_mutex_unlock(&file_system_lock);
 
 	return 0;
 }
