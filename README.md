@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://www.cs.rutgers.edu/~pxk/416/notes/images/13-ufs.png"/>
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Ext2-inode.svg/1200px-Ext2-inode.svg.png"/>
 </p>
 
 # tiny-file-system
